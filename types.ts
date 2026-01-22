@@ -5,22 +5,18 @@ export interface NLUMetadata {
 }
 
 export interface NLUFrameRole {
-  role_name: string;
   type: string;
   surface: string;
   lemma?: string;
   definiteness?: string;
+  ref?: string;
+  ref_frame?: string;
 }
 
 export interface NLUFrame {
   frame_name: string;
   lexical_unit: string;
-  roles: NLUFrameRole[];
-}
-
-export interface NSMExplication {
-  token: string;
-  definition: string;
+  roles: Record<string, NLUFrameRole>;
 }
 
 export interface NLUVisualGuidelines {
@@ -36,29 +32,28 @@ export interface NLUData {
   lang: string;
   metadata: NLUMetadata;
   frames: NLUFrame[];
-  nsm_explictations: NSMExplication[];
-  logical_form: {
-    event: string;
-    modality: string;
-  };
-  pragmatics: {
-    politeness: string;
-    formality: string;
-    expected_response: string;
-  };
   visual_guidelines: NLUVisualGuidelines;
 }
 
+export type StepStatus = 'idle' | 'processing' | 'completed' | 'error' | 'outdated';
+
 export interface RowData {
   id: string;
-  spanish: string;
-  english: string;
-  nlu?: NLUData | string;
-  visualElements?: string;
-  imagePrompt?: string;
-  svgCode?: string;
+  text: string; // UTTERANCE
+  nlu?: NLUData | string; // NLU
+  visualBlocks?: string; // VISUAL-BLOCKS
+  prompt?: string; // PROMPT
+  svgCode?: string; // SVG
   status: 'idle' | 'processing' | 'completed' | 'error';
-  error?: string;
+  nluStatus: StepStatus;
+  visualStatus: StepStatus;
+  svgStatus: StepStatus;
+  nluDuration?: number;
+  visualDuration?: number;
+  svgDuration?: number;
+  isManualNlu?: boolean;
+  isManualVisual?: boolean;
+  isManualSvg?: boolean;
 }
 
 export interface LogEntry {
@@ -67,3 +62,11 @@ export interface LogEntry {
   type: 'info' | 'error' | 'success';
   message: string;
 }
+
+export const VOCAB = {
+  speech_act: ['assertive', 'directive', 'commissive', 'expressive', 'declarative', 'interrogative'],
+  intent: ['inform', 'request', 'desire_expression', 'command', 'offer', 'promise', 'thanking', 'greeting', 'question', 'complaint'],
+  role_type: ['Agent', 'Object', 'Event', 'Attribute', 'Place', 'Time', 'Abstract', 'Quantity', 'Recipient', 'Instrument'],
+  definiteness: ['none', 'definite', 'indefinite'],
+  lang: ['en', 'es', 'fr', 'pt', 'it', 'de']
+};

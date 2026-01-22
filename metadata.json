@@ -1,5 +1,5 @@
 {
-  "name": "MF-pipeliner",
+  "name": "PipeLiner",
   "description": "Prompt Architect for Pictographic SVGs. \nA professional tool for linguists to generate high-fidelity NLU JSON schemas (MediaFranca compatible) and optimized SVG pictogram prompts from Spanish-English sentence pairs.",
   "requestFramePermissions": []
 }
