@@ -8,10 +8,35 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Inter', sans-serif; }
-    .mono { font-family: 'Fira Code', monospace; }
+    :root {
+      --primary-dark: #2e1065; /* Violet 950 */
+      --furious-orange: #f97316; /* Orange 500 */
+    }
+    
+    body { 
+      font-family: 'Lexend', sans-serif !important; 
+      background-color: #f8fafc;
+    }
+    
+    .mono { font-family: 'Fira Code', monospace !important; }
+    
+    @keyframes generative-pulse {
+      0% { background-color: var(--furious-orange); transform: scale(1); box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7); }
+      33% { background-color: #22d3ee; transform: scale(1.05); }
+      66% { background-color: #7c3aed; transform: scale(1.05); }
+      100% { background-color: var(--furious-orange); transform: scale(1); box-shadow: 0 0 0 15px rgba(124, 58, 237, 0); }
+    }
+    
+    .animate-generative {
+      animation: generative-pulse 2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Reducción de redondez global */
+    .rounded-3xl { border-radius: 0.75rem !important; }
+    .rounded-2xl { border-radius: 0.5rem !important; }
+    .rounded-xl { border-radius: 0.375rem !important; }
   </style>
 <script type="importmap">
 {
