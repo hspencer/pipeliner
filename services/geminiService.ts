@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { NLUData, NLUFrame, NLUFrameRole, GlobalConfig } from "../types";
+import { NLUData, NLUFrame, NLUFrameRole, GlobalConfig, RowData } from "../types";
 
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -24,9 +24,6 @@ const cleanJSONResponse = (text: string): string => {
   return cleaned;
 };
 
-/**
- * GENERACIÓN NLU: Fija el estándar MediaFranca en Inglés.
- */
 export const generateNLU = async (utterance: string): Promise<NLUData> => {
   const ai = getAI();
   const systemInstruction = `You are a MediaFranca Semanticist. 
@@ -114,14 +111,11 @@ export const generateNLU = async (utterance: string): Promise<NLUData> => {
   return rawJson as NLUData;
 };
 
-/**
- * GENERACIÓN DE BLUEPRINT: Aquí es donde editamos la lógica de Visual Blocks.
- */
-export const generateVisualBlueprint = async (nlu: NLUData, lang: string): Promise<{ visualBlocks: string; prompt: string }> => {
+export const generateVisualBlueprint = async (nlu: NLUData, lang: string): Promise<Partial<RowData>> => {
   const ai = getAI();
   const systemInstruction = `You are a Visual Architect for PictoNet. Translate NLU semantics into a visual pictogram structure.
 
-  REGLAS DE BLOQUES VISUALES (visualBlocks):
+  REGLAS DE BLOQUES VISUALES (VISUAL-BLOCKS):
   1. NO USAR VERBOS. Los IDs deben ser sustantivos o componentes físicos (ej. NO "#running", SÍ "#legs_extended, #motion_lines").
   2. INCORPORA VISUAL BLENDS: Si hay movimiento, añade "#motion_lines". Si hay foco, "#focus_indicator". Si hay deseo, "#heart_symbol" o similares.
   3. ESTRUCTURA: Lista de IDs separados por comas empezando con #.
@@ -130,7 +124,7 @@ export const generateVisualBlueprint = async (nlu: NLUData, lang: string): Promi
   1. Debe estar en ${lang}.
   2. Describe la composición espacial: ¿dónde está el actor? ¿dónde el objeto? ¿qué "visual blends" se usan para representar la acción?
   
-  Return valid JSON only.`;
+  Return valid JSON only with keys "VISUAL-BLOCKS" and "PROMPT".`;
   
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
@@ -141,10 +135,10 @@ export const generateVisualBlueprint = async (nlu: NLUData, lang: string): Promi
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          visualBlocks: { type: Type.STRING },
-          prompt: { type: Type.STRING }
+          "VISUAL-BLOCKS": { type: Type.STRING },
+          PROMPT: { type: Type.STRING }
         },
-        required: ["visualBlocks", "prompt"]
+        required: ["VISUAL-BLOCKS", "PROMPT"]
       }
     }
   });
@@ -152,9 +146,6 @@ export const generateVisualBlueprint = async (nlu: NLUData, lang: string): Promi
   return JSON.parse(cleanJSONResponse(response.text));
 };
 
-/**
- * GENERACIÓN SVG: Renderiza los bloques incluyendo los visual blends.
- */
 export const generateSVG = async (visualBlocks: string, prompt: string, row: any, config: GlobalConfig): Promise<string> => {
   const ai = getAI();
   const systemInstruction = `You are a professional SVG Engineer for PictoNet.

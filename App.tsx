@@ -2,15 +2,15 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { 
   Upload, Download, Trash2, Terminal, RefreshCw, ChevronDown, 
-  PlayCircle, BookOpen, Search, ArrowRight, FileDown, StopCircle, Sparkles, Sliders,
-  CheckCircle2, AlertCircle, X, Code, Plus, Save
+  PlayCircle, BookOpen, Search, FileDown, StopCircle, Sparkles, Sliders,
+  X, Code, Plus
 } from 'lucide-react';
 import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB } from './types';
 import * as Gemini from './services/geminiService';
-import { CANONICAL_CSV } from './data/canonicalData';
+import { CANONICAL_DATA } from './data/canonicalData';
 
-const STORAGE_KEY = 'pipeliner_v13_storage';
-const CONFIG_KEY = 'pipeliner_v13_config';
+const STORAGE_KEY = 'pipeliner_v14_storage';
+const CONFIG_KEY = 'pipeliner_v14_config';
 
 const capitalize = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
 
@@ -54,69 +54,65 @@ const App: React.FC = () => {
   };
 
   const processContent = (text: string) => {
-    const lines = text.split('\n').filter(l => l.trim() !== "");
-    if (lines.length < 1) return;
-    
-    const headers = lines[0].split('\t').map(h => h.trim().toLowerCase());
-    const idxID = headers.indexOf('id');
-    const idxES = headers.indexOf('español');
-    const idxEN = headers.indexOf('inglés');
-    const idxNLU = headers.indexOf('nlu');
-    const idxPrompt = headers.indexOf('image prompt');
-
-    const newRows: RowData[] = lines.slice(1).map((line, i) => {
-      const parts = line.split('\t');
-      const utterance = parts[idxES] || parts[idxEN] || parts[0] || "";
-      return {
-        id: parts[idxID] || `R_${Date.now()}_${i}`,
-        text: capitalize(utterance.trim()),
-        nlu: parts[idxNLU] && parts[idxNLU] !== "{empty}" ? parts[idxNLU] : undefined,
-        prompt: parts[idxPrompt] && parts[idxPrompt] !== "{empty}" ? parts[idxPrompt] : undefined,
-        status: 'idle', nluStatus: 'idle', visualStatus: 'idle', svgStatus: 'idle'
-      } as RowData;
-    });
-    setRows(prev => [...prev, ...newRows]);
-    setViewMode('list');
-    addLog('success', `Cargados ${newRows.length} registros.`);
+    try {
+      const data = JSON.parse(text);
+      const items = Array.isArray(data) ? data : [data];
+      const newRows: RowData[] = items.map((item, i) => ({
+        id: item.id || `R_${Date.now()}_${i}`,
+        UTTERANCE: item.UTTERANCE || item.utterance || "",
+        NLU: item.NLU || item.nlu,
+        "VISUAL-BLOCKS": item["VISUAL-BLOCKS"] || item["visual-blocks"],
+        PROMPT: item.PROMPT || item.prompt,
+        SVG: item.SVG || item.svg,
+        status: 'idle',
+        nluStatus: (item.NLU || item.nlu) ? 'completed' : 'idle',
+        visualStatus: (item["VISUAL-BLOCKS"] || item["visual-blocks"]) ? 'completed' : 'idle',
+        svgStatus: (item.SVG || item.svg) ? 'completed' : 'idle'
+      }));
+      setRows(prev => [...prev, ...newRows]);
+      setViewMode('list');
+      addLog('success', `Importados ${newRows.length} registros desde JSON.`);
+    } catch (e) {
+      addLog('error', 'Error al procesar el archivo JSON. Asegúrate de que sea un array de objetos válido.');
+    }
   };
 
   const downloadTemplate = () => {
-    const headers = "ID\tEspañol\tInglés\tNLU\tImage Prompt\n";
-    const example = "1\tQuiero comer una manzana\tI want to eat an apple\t{}\tRepresentación de una persona comiendo una manzana";
-    const blob = new Blob([headers + example], { type: 'text/tab-separated-values' });
+    const template = [{
+      UTTERANCE: "Quiero beber agua",
+      NLU: {},
+      "VISUAL-BLOCKS": "#person, #glass, #water_droplets",
+      PROMPT: "Representación minimalista de una persona bebiendo de un vaso con gotas de agua.",
+      SVG: ""
+    }];
+    const blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = "plantilla_pipeliner.tsv";
+    a.download = "plantilla_pipeliner.json";
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const exportTSV = () => {
-    const headers = ["ID", "Español", "NLU", "Visual-Blocks", "Image Prompt", "SVG"].join("\t");
-    const dataRows = rows.map(r => [
-      r.id,
-      r.text,
-      typeof r.nlu === 'object' ? JSON.stringify(r.nlu) : (r.nlu || "{empty}"),
-      r.visualBlocks || "{empty}",
-      r.prompt || "{empty}",
-      r.svgCode || "{empty}"
-    ].join("\t"));
-    const blob = new Blob([headers + "\n" + dataRows.join("\n")], { type: 'text/tab-separated-values' });
+  const exportJSON = () => {
+    const cleanRows = rows.map(({ id, UTTERANCE, NLU, "VISUAL-BLOCKS": vb, PROMPT, SVG }) => ({
+      id, UTTERANCE, NLU, "VISUAL-BLOCKS": vb, PROMPT, SVG
+    }));
+    const blob = new Blob([JSON.stringify(cleanRows, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `pipeliner_export_${new Date().toISOString().split('T')[0]}.tsv`;
+    a.download = `pipeliner_export_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    addLog('success', 'Exportación TSV completada.');
+    addLog('success', 'Proyecto exportado como JSON.');
   };
 
   const addNewRow = (textValue: string = "") => {
     const newId = `R_MANUAL_${Date.now()}`;
     const newEntry: RowData = {
       id: newId, 
-      text: textValue || 'Nueva Unidad Semántica', 
+      UTTERANCE: textValue || 'Nueva Unidad Semántica', 
       status: 'idle', nluStatus: 'idle', visualStatus: 'idle', svgStatus: 'idle'
     };
     setRows(prev => [newEntry, ...prev]);
@@ -146,11 +142,11 @@ const App: React.FC = () => {
 
     try {
       let result: any;
-      if (step === 'nlu') result = await Gemini.generateNLU(row.text);
+      if (step === 'nlu') result = await Gemini.generateNLU(row.UTTERANCE);
       else if (step === 'visual') {
-        const nluObj = typeof row.nlu === 'string' ? JSON.parse(row.nlu) : row.nlu;
-        result = await Gemini.generateVisualBlueprint(nluObj, config.lang);
-      } else if (step === 'svg') result = await Gemini.generateSVG(row.visualBlocks || "", row.prompt || "", row, config);
+        const nluObj = typeof row.NLU === 'string' ? JSON.parse(row.NLU) : row.NLU;
+        result = await Gemini.generateVisualBlueprint(nluObj as NLUData, config.lang);
+      } else if (step === 'svg') result = await Gemini.generateSVG(row["VISUAL-BLOCKS"] || "", row.PROMPT || "", row, config);
 
       if (stopFlags.current[row.id]) return false;
 
@@ -158,9 +154,9 @@ const App: React.FC = () => {
       updateRow(index, { 
         [statusKey]: 'completed', 
         [durationKey]: duration,
-        ...(step === 'nlu' ? { nlu: result } : {}),
-        ...(step === 'visual' ? { visualBlocks: result.visualBlocks, prompt: result.prompt } : {}),
-        ...(step === 'svg' ? { svgCode: result, status: 'completed' } : {})
+        ...(step === 'nlu' ? { NLU: result } : {}),
+        ...(step === 'visual' ? { "VISUAL-BLOCKS": result["VISUAL-BLOCKS"], PROMPT: result.PROMPT } : {}),
+        ...(step === 'svg' ? { SVG: result, status: 'completed' } : {})
       });
       addLog('success', `${step.toUpperCase()} completo: ${duration}s`);
       return true;
@@ -174,7 +170,7 @@ const App: React.FC = () => {
   const filteredRows = useMemo(() => {
     if (!searchValue) return rows;
     const lowSearch = searchValue.toLowerCase();
-    return rows.filter(r => r.text.toLowerCase().includes(lowSearch));
+    return rows.filter(r => r.UTTERANCE.toLowerCase().includes(lowSearch));
   }, [rows, searchValue]);
 
   return (
@@ -194,13 +190,13 @@ const App: React.FC = () => {
             <input 
               value={searchValue} onFocus={() => setIsSearching(true)} onBlur={() => setTimeout(() => setIsSearching(false), 200)}
               onChange={(e) => setSearchValue(e.target.value)}
-              placeholder="Filtrar por enunciado o concepto..." className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-bold ml-2"
+              placeholder="Intención comunicativa" className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-bold ml-2"
             />
           </div>
         </div>
 
         <div className="flex gap-2">
-          {rows.length > 0 && <button onClick={exportTSV} className="p-2.5 hover:bg-slate-50 text-slate-400" title="Exportar Todo (TSV)"><Download size={18}/></button>}
+          {rows.length > 0 && <button onClick={exportJSON} className="p-2.5 hover:bg-slate-50 text-slate-400" title="Exportar Proyecto (JSON)"><Download size={18}/></button>}
           {rows.length > 0 && <button onClick={() => setViewMode('list')} className="p-2.5 hover:bg-slate-50 text-slate-400" title="Ver Workbench"><BookOpen size={18}/></button>}
           <button onClick={() => setShowConfig(!showConfig)} className="p-2.5 hover:bg-slate-50 text-slate-400" title="Ajustes Globales"><Sliders size={18}/></button>
           <button onClick={() => setShowConsole(!showConsole)} className="p-2.5 hover:bg-slate-50 text-slate-400" title="Monitor Semántico"><Terminal size={18}/></button>
@@ -236,36 +232,30 @@ const App: React.FC = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
-              <div onClick={() => processContent(CANONICAL_CSV)} className="bg-white p-8 border border-slate-200 text-left space-y-4 shadow-xl hover:border-violet-950 transition-all cursor-pointer group hover:-translate-y-1">
-                <div className="text-emerald-600 group-hover:scale-110 transition-transform"><BookOpen size={32}/></div>
-                <h3 className="font-bold text-lg uppercase tracking-wider text-slate-900 leading-tight">Canon Dataset</h3>
-                <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Carga el set de datos canónico de PictoNet.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+              <div onClick={() => processContent(JSON.stringify(CANONICAL_DATA))} className="bg-white p-12 border border-slate-200 text-left space-y-6 shadow-xl hover:border-violet-950 transition-all cursor-pointer group hover:-translate-y-1">
+                <div className="text-emerald-600 group-hover:scale-110 transition-transform"><BookOpen size={40}/></div>
+                <h3 className="font-bold text-xl uppercase tracking-wider text-slate-900">Canon Dataset</h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-medium">Carga el set de datos canónico de PictoNet desde JSON.</p>
               </div>
 
-              <div onClick={() => fileInputRef.current?.click()} className="bg-violet-950 p-8 text-left space-y-4 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1">
-                <div className="text-white group-hover:scale-110 transition-transform"><Upload size={32}/></div>
-                <h3 className="font-bold text-lg uppercase tracking-wider text-white leading-tight">Import TSV</h3>
-                <p className="text-[10px] text-violet-300 leading-relaxed font-medium">Procesa archivos masivos por cabeceras.</p>
-                <input ref={fileInputRef} type="file" className="hidden" onChange={e => e.target.files?.[0]?.text().then(processContent)}/>
+              <div onClick={() => fileInputRef.current?.click()} className="bg-violet-950 p-12 text-left space-y-6 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1">
+                <div className="text-white group-hover:scale-110 transition-transform"><Upload size={40}/></div>
+                <h3 className="font-bold text-xl uppercase tracking-wider text-white">Import JSON</h3>
+                <p className="text-xs text-violet-300 leading-relaxed font-medium">Carga un proyecto previo o una lista de enunciados en formato JSON.</p>
+                <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={e => e.target.files?.[0]?.text().then(processContent)}/>
               </div>
 
-              <div onClick={downloadTemplate} className="bg-slate-100 p-8 text-left space-y-4 shadow-xl hover:bg-slate-200 transition-all cursor-pointer group hover:-translate-y-1">
-                <div className="text-slate-600 group-hover:scale-110 transition-transform"><Download size={32}/></div>
-                <h3 className="font-bold text-lg uppercase tracking-wider text-slate-900 leading-tight">Template</h3>
-                <p className="text-[10px] text-slate-500 leading-relaxed font-medium">Descarga la estructura base para tu TSV.</p>
-              </div>
-
-              <div onClick={() => addNewRow()} className="bg-slate-900 p-8 text-left space-y-4 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1">
-                <div className="text-amber-500 group-hover:scale-110 transition-transform"><Sparkles size={32}/></div>
-                <h3 className="font-bold text-lg uppercase tracking-wider text-white leading-tight">Manual Mode</h3>
-                <p className="text-[10px] text-slate-500 leading-relaxed font-medium">Crea una nueva unidad semántica manual.</p>
+              <div onClick={downloadTemplate} className="bg-slate-100 p-12 text-left space-y-6 shadow-xl hover:bg-slate-200 transition-all cursor-pointer group hover:-translate-y-1">
+                <div className="text-slate-600 group-hover:scale-110 transition-transform"><Download size={40}/></div>
+                <h3 className="font-bold text-xl uppercase tracking-wider text-slate-900">Template JSON</h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-medium">Descarga la estructura de claves transversal (UTTERANCE, NLU...).</p>
               </div>
             </div>
           </div>
         ) : (
           <div className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
-            {filteredRows.length === 0 && (
+            {filteredRows.length === 0 && searchValue && (
               <div className="py-20 text-center border-2 border-dashed border-slate-200 flex flex-col items-center gap-6">
                 <p className="text-slate-400 font-medium uppercase tracking-widest text-xs">No se encontraron resultados para "{searchValue}"</p>
                 <button 
@@ -319,9 +309,9 @@ const RowComponent: React.FC<{
 
   const handleDownloadSVG = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!row.svgCode) return;
-    const filename = row.text.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    const blob = new Blob([row.svgCode], { type: 'image/svg+xml' });
+    if (!row.SVG) return;
+    const filename = row.UTTERANCE.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const blob = new Blob([row.SVG], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -337,18 +327,17 @@ const RowComponent: React.FC<{
       <div className="p-6 flex items-center gap-8 group">
         <div className="flex-1 utterance-title flex items-center gap-2">
            <input 
-            type="text" value={row.text} onChange={e => onUpdate({ text: e.target.value })}
+            type="text" value={row.UTTERANCE} onChange={e => onUpdate({ UTTERANCE: e.target.value })}
             className="w-full bg-transparent border-none outline-none focus:ring-0 utterance-title text-slate-900 uppercase font-light truncate"
             onClick={e => e.stopPropagation()}
            />
         </div>
-        {/* FIX: Merged duplicated className attributes into a single one */}
         <div className="flex gap-2 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
           <Badge label="NLU" status={row.nluStatus} />
           <Badge label="BLOCKS" status={row.visualStatus} />
           <Badge label="SVG" status={row.svgStatus} />
         </div>
-        <div className="w-14 h-14 border bg-slate-50 flex items-center justify-center p-1 group-hover:scale-110 transition-transform cursor-pointer" onClick={() => setIsOpen(!isOpen)} dangerouslySetInnerHTML={{ __html: row.svgCode || "" }} />
+        <div className="w-14 h-14 border bg-slate-50 flex items-center justify-center p-1 group-hover:scale-110 transition-transform cursor-pointer" onClick={() => setIsOpen(!isOpen)} dangerouslySetInnerHTML={{ __html: row.SVG || "" }} />
         <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
           <button onClick={e => { e.stopPropagation(); onCascade(); }} className="p-3 bg-violet-950 text-white shadow-lg hover:bg-black transition-all"><PlayCircle size={18}/></button>
           <button onClick={e => { e.stopPropagation(); onDelete(); }} className="p-3 text-rose-300 hover:text-rose-600 transition-colors"><Trash2 size={18}/></button>
@@ -358,20 +347,20 @@ const RowComponent: React.FC<{
 
       {isOpen && (
         <div className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2">
-          <StepBox label="NLU" status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} duration={row.nluDuration}>
-            <SmartNLUEditor data={row.nlu} onUpdate={val => onUpdate({ nlu: val })} />
+          <StepBox label="NLU (MediaFranca)" status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} duration={row.nluDuration}>
+            <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val })} />
           </StepBox>
 
           <StepBox label="BLOCKS & PROMPT" status={row.visualStatus} onRegen={() => onProcess('visual')} onStop={onStop} duration={row.visualDuration}>
              <div className="flex flex-col h-full gap-6">
                 <div className="mb-2">
                   <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 tracking-widest">Fixed Visual Blocks</label>
-                  <BlocksList value={row.visualBlocks || ""} onChange={val => onUpdate({ visualBlocks: val })} />
+                  <BlocksList value={row["VISUAL-BLOCKS"] || ""} onChange={val => onUpdate({ "VISUAL-BLOCKS": val })} />
                 </div>
                 <div className="flex-1 mt-6 border-t pt-6 border-slate-200">
                   <label className="text-[10px] font-medium uppercase text-slate-400 block mb-3 tracking-widest">Drawing Strategy (Prompt)</label>
                   <textarea 
-                    value={row.prompt || ""} onChange={e => onUpdate({ prompt: e.target.value })} 
+                    value={row.PROMPT || ""} onChange={e => onUpdate({ PROMPT: e.target.value })} 
                     className="w-full h-full border-none p-0 text-lg font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed" 
                     placeholder="Describe the spatial strategy and visual blends..."
                   />
@@ -381,12 +370,12 @@ const RowComponent: React.FC<{
 
           <StepBox 
             label="SVG RENDERING" status={row.svgStatus} onRegen={() => onProcess('svg')} onStop={onStop} duration={row.svgDuration}
-            actionNode={row.svgCode && <button onClick={handleDownloadSVG} className="p-2 border hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all rounded-full flex items-center justify-center bg-white shadow-sm" title="Descargar SVG Final"><FileDown size={14}/></button>}
+            actionNode={row.SVG && <button onClick={handleDownloadSVG} className="p-2 border hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all rounded-full flex items-center justify-center bg-white shadow-sm" title="Descargar SVG Final"><FileDown size={14}/></button>}
           >
             <div className="flex flex-col h-full gap-4">
               <div className="relative group/code">
                 <textarea 
-                  value={row.svgCode || ""} onChange={e => onUpdate({ svgCode: e.target.value })} 
+                  value={row.SVG || ""} onChange={e => onUpdate({ SVG: e.target.value })} 
                   className="w-full h-32 bg-white text-slate-600 p-4 mono text-[9px] resize-none border border-slate-200 outline-none shadow-sm focus:bg-white transition-colors"
                   placeholder="SVG Output..."
                 />
@@ -394,7 +383,7 @@ const RowComponent: React.FC<{
               </div>
               <div className="flex-1 border-2 border-slate-200 bg-white flex items-center justify-center p-4 shadow-inner relative overflow-hidden group/preview min-h-[250px]">
                  <div className="w-full h-full flex items-center justify-center transition-transform duration-500 group-hover/preview:scale-110" 
-                      dangerouslySetInnerHTML={{ __html: (row.svgCode || '').includes('<svg') ? row.svgCode! : '<div class="text-[10px] text-slate-200 uppercase font-medium">Waiting for render...</div>' }} />
+                      dangerouslySetInnerHTML={{ __html: (row.SVG || '').includes('<svg') ? row.SVG! : '<div class="text-[10px] text-slate-200 uppercase font-medium">Waiting for render...</div>' }} />
               </div>
             </div>
           </StepBox>

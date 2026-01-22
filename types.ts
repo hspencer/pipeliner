@@ -39,11 +39,11 @@ export type StepStatus = 'idle' | 'processing' | 'completed' | 'error' | 'outdat
 
 export interface RowData {
   id: string;
-  text: string; // UTTERANCE
-  nlu?: NLUData | string; // NLU
-  visualBlocks?: string; // VISUAL-BLOCKS
-  prompt?: string; // PROMPT
-  svgCode?: string; // SVG
+  UTTERANCE: string;
+  NLU?: NLUData | string;
+  "VISUAL-BLOCKS"?: string;
+  PROMPT?: string;
+  SVG?: string;
   status: 'idle' | 'processing' | 'completed' | 'error';
   nluStatus: StepStatus;
   visualStatus: StepStatus;
@@ -51,9 +51,6 @@ export interface RowData {
   nluDuration?: number;
   visualDuration?: number;
   svgDuration?: number;
-  isManualNlu?: boolean;
-  isManualVisual?: boolean;
-  isManualSvg?: boolean;
 }
 
 export interface LogEntry {
