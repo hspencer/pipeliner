@@ -63,6 +63,13 @@ export interface LogEntry {
   message: string;
 }
 
+export interface GlobalConfig {
+  lang: string;
+  svgSize: number;
+  author: string;
+  license: string;
+}
+
 export const VOCAB = {
   speech_act: ['assertive', 'directive', 'commissive', 'expressive', 'declarative', 'interrogative'],
   intent: ['inform', 'request', 'desire_expression', 'command', 'offer', 'promise', 'thanking', 'greeting', 'question', 'complaint'],

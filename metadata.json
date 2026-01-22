@@ -1,5 +1,5 @@
 {
   "name": "PipeLiner",
-  "description": "Prompt Architect for Pictographic SVGs. \nA professional tool for linguists to generate high-fidelity NLU JSON schemas (MediaFranca compatible) and optimized SVG pictogram prompts from Spanish-English sentence pairs.",
+  "description": "Expansor de NLU semántico a Pictogramas. \nHerramienta profesional para lingüistas para generar esquemas NLU JSON de alta fidelidad y prompts optimizados para pictogramas SVG.",
   "requestFramePermissions": []
 }
