@@ -8,36 +8,32 @@ const cleanJSONResponse = (text: string): string => {
   if (!text) return '{}';
   let cleaned = text.trim();
   cleaned = cleaned.replace(/^```(?:json|svg|xml)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  
   const firstBrace = cleaned.indexOf('{');
   const lastBrace = cleaned.lastIndexOf('}');
   const firstBracket = cleaned.indexOf('[');
   const lastBracket = cleaned.lastIndexOf(']');
-  
-  let start = -1;
-  let end = -1;
-  
+  let start = -1; let end = -1;
   if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
-    start = firstBrace;
-    end = lastBrace;
+    start = firstBrace; end = lastBrace;
   } else if (firstBracket !== -1) {
-    start = firstBracket;
-    end = lastBracket;
+    start = firstBracket; end = lastBracket;
   }
-  
   if (start !== -1 && end !== -1 && end > start) {
     return cleaned.substring(start, end + 1);
   }
-  
   return cleaned;
 };
 
+/**
+ * GENERACIÓN NLU: Fija el estándar MediaFranca en Inglés.
+ */
 export const generateNLU = async (utterance: string): Promise<NLUData> => {
   const ai = getAI();
-  const systemInstruction = `You are a MediaFranca Semanticist. Generate a formal NLU JSON for the given UTTERANCE.
-  Detect the language and ensure the schema is strictly followed. 
-  "roles" inside frames MUST be an ARRAY of objects where each object has a "role_name" key.
-  Return ONLY strictly valid JSON.`;
+  const systemInstruction = `You are a MediaFranca Semanticist. 
+  Generate a formal NLU JSON for the given UTTERANCE.
+  CRITICAL: The NLU schema (intents, frames, guidelines) MUST ALWAYS BE IN ENGLISH (Strict EN-US).
+  Follow the MediaFranca PictoNet standard for NLU structure.
+  Return only valid JSON.`;
   
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
@@ -118,13 +114,23 @@ export const generateNLU = async (utterance: string): Promise<NLUData> => {
   return rawJson as NLUData;
 };
 
-export const generateVisualBlueprint = async (nlu: NLUData): Promise<{ visualBlocks: string; prompt: string }> => {
+/**
+ * GENERACIÓN DE BLUEPRINT: Aquí es donde editamos la lógica de Visual Blocks.
+ */
+export const generateVisualBlueprint = async (nlu: NLUData, lang: string): Promise<{ visualBlocks: string; prompt: string }> => {
   const ai = getAI();
-  const systemInstruction = `You are a Visual Architect. Translate NLU semantics into a visual structure.
-  CRITICAL: You MUST map the Lexical Units and Frames from the NLU to specific SVG IDs.
-  "visualBlocks" must be a comma-separated list of IDs (e.g. "#agent_person, #theme_object").
-  "prompt" describes how to draw these blocks to represent the core action defined in the NLU frames.
-  Return ONLY strictly valid JSON.`;
+  const systemInstruction = `You are a Visual Architect for PictoNet. Translate NLU semantics into a visual pictogram structure.
+
+  REGLAS DE BLOQUES VISUALES (visualBlocks):
+  1. NO USAR VERBOS. Los IDs deben ser sustantivos o componentes físicos (ej. NO "#running", SÍ "#legs_extended, #motion_lines").
+  2. INCORPORA VISUAL BLENDS: Si hay movimiento, añade "#motion_lines". Si hay foco, "#focus_indicator". Si hay deseo, "#heart_symbol" o similares.
+  3. ESTRUCTURA: Lista de IDs separados por comas empezando con #.
+  
+  REGLAS DE PROMPT:
+  1. Debe estar en ${lang}.
+  2. Describe la composición espacial: ¿dónde está el actor? ¿dónde el objeto? ¿qué "visual blends" se usan para representar la acción?
+  
+  Return valid JSON only.`;
   
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
@@ -146,30 +152,31 @@ export const generateVisualBlueprint = async (nlu: NLUData): Promise<{ visualBlo
   return JSON.parse(cleanJSONResponse(response.text));
 };
 
+/**
+ * GENERACIÓN SVG: Renderiza los bloques incluyendo los visual blends.
+ */
 export const generateSVG = async (visualBlocks: string, prompt: string, row: any, config: GlobalConfig): Promise<string> => {
   const ai = getAI();
-  const nluData = typeof row.nlu === 'object' ? row.nlu : JSON.parse(row.nlu || '{}');
+  const systemInstruction = `You are a professional SVG Engineer for PictoNet.
   
-  const systemInstruction = `You are an SVG Engineer expert. 
-  CRITICAL CASCADE RULE: You MUST use the NLU and the Visual Blueprint as the source of truth.
-  1. Use the utterance: "${row.text}".
-  2. The SVG <metadata> MUST include the Lexical Units and Frames found in the NLU JSON: ${JSON.stringify(nluData)}.
-  3. Every graphical group <g> MUST have an id that matches the IDs listed in the Visual Blueprint: ${visualBlocks}.
-  4. Follow the PictoNet standard for styling (.f for fills, .k for strokes).
-  5. The output MUST be a valid 100x100 SVG.
-  6. Ensure the 'title' and 'desc' tags are descriptive of the action described in the NLU.
+  CRITICAL STYLING RULES:
+  - Class .f: FILL WHITE (#fff), STROKE BLACK (#000). Use for solid objects.
+  - Class .k: FILL BLACK (#000), STROKE WHITE (#fff). Use for high-contrast or human figures.
+  - VISUAL BLENDS (Líneas de movimiento, auras): Represent them using clean, minimalist strokes (stroke-width: 2px typical).
   
-  Return ONLY the raw <svg> tag. No conversational text.`;
+  INTEGRATION:
+  Interpret the requested Visual Blocks [${visualBlocks}] and the Strategy [${prompt}].
+  Ensure the SVG is semantic, uses <g> with IDs, and provides accessibility tags in ${config.lang}.
+  Output raw <svg> only, 100x100 viewport.`;
 
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
-    contents: `STRATEGY: ${prompt}. Generate the high-fidelity semantic SVG following the strict metadata requirements.`,
+    contents: `Strategy: ${prompt}. Required Visual Elements: ${visualBlocks}. Create the final PictoNet SVG.`,
     config: { systemInstruction }
   });
 
   const text = response.text || '';
   const svgMatch = text.match(/<svg[\s\S]*?<\/svg>/i);
   if (svgMatch) return svgMatch[0];
-  
   return cleanJSONResponse(text);
 };
