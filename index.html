@@ -11,32 +11,42 @@
   <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary-dark: #2e1065; /* Violet 950 */
-      --furious-orange: #f97316; /* Orange 500 */
+      --primary-dark: #1e1b4b;
+      --furious-orange: #f97316; 
+    }
+    
+    * {
+      font-family: 'Lexend', sans-serif !important;
+      border-radius: 4px !important;
+    }
+    
+    .mono, .mono * { 
+      font-family: 'Fira Code', monospace !important; 
     }
     
     body { 
-      font-family: 'Lexend', sans-serif !important; 
       background-color: #f8fafc;
-    }
-    
-    .mono { font-family: 'Fira Code', monospace !important; }
-    
-    @keyframes generative-pulse {
-      0% { background-color: var(--furious-orange); transform: scale(1); box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7); }
-      33% { background-color: #22d3ee; transform: scale(1.05); }
-      66% { background-color: #7c3aed; transform: scale(1.05); }
-      100% { background-color: var(--furious-orange); transform: scale(1); box-shadow: 0 0 0 15px rgba(124, 58, 237, 0); }
-    }
-    
-    .animate-generative {
-      animation: generative-pulse 2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+      color: #0f172a;
     }
 
-    /* Reducción de redondez global */
-    .rounded-3xl { border-radius: 0.75rem !important; }
-    .rounded-2xl { border-radius: 0.5rem !important; }
-    .rounded-xl { border-radius: 0.375rem !important; }
+    @keyframes spectral-pulse {
+      0% { background-color: var(--furious-orange); box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7); }
+      33% { background-color: #06b6d4; } /* Turquesa */
+      66% { background-color: #6366f1; } /* Azulado Morado */
+      100% { background-color: var(--furious-orange); box-shadow: 0 0 0 12px rgba(99, 102, 241, 0); }
+    }
+    
+    .animate-spectral {
+      animation: spectral-pulse 2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .rounded-full { border-radius: 9999px !important; }
+    
+    /* Scrollbars técnicos */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
   </style>
 <script type="importmap">
 {

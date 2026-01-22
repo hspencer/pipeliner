@@ -7,10 +7,8 @@ const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 const cleanJSONResponse = (text: string): string => {
   if (!text) return '{}';
   let cleaned = text.trim();
-  // Strip markdown code blocks if they exist
   cleaned = cleaned.replace(/^```(?:json|svg|xml)?\s*/i, '').replace(/\s*```$/i, '').trim();
   
-  // If we're looking for JSON (used in NLU and Visual Blueprint)
   const firstBrace = cleaned.indexOf('{');
   const lastBrace = cleaned.lastIndexOf('}');
   const firstBracket = cleaned.indexOf('[');
@@ -19,7 +17,6 @@ const cleanJSONResponse = (text: string): string => {
   let start = -1;
   let end = -1;
   
-  // Basic heuristic: find the outer-most JSON structure
   if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
     start = firstBrace;
     end = lastBrace;
@@ -29,22 +26,18 @@ const cleanJSONResponse = (text: string): string => {
   }
   
   if (start !== -1 && end !== -1 && end > start) {
-    // Return only the JSON part
     return cleaned.substring(start, end + 1);
   }
   
   return cleaned;
 };
 
-/**
- * PHASE 1: Generate NLU from UTTERANCE
- */
 export const generateNLU = async (utterance: string): Promise<NLUData> => {
   const ai = getAI();
   const systemInstruction = `You are a MediaFranca Semanticist. Generate a formal NLU JSON for the given UTTERANCE.
   Detect the language and ensure the schema is strictly followed. 
   "roles" inside frames MUST be an ARRAY of objects where each object has a "role_name" key.
-  Return ONLY strictly valid JSON. No preamble, no postamble.`;
+  Return ONLY strictly valid JSON.`;
   
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
@@ -110,8 +103,6 @@ export const generateNLU = async (utterance: string): Promise<NLUData> => {
   });
 
   const rawJson = JSON.parse(cleanJSONResponse(response.text));
-  
-  // Transform roles from Array to Record for internal app state
   if (rawJson.frames && Array.isArray(rawJson.frames)) {
     rawJson.frames = rawJson.frames.map((frame: any) => {
       const rolesRecord: Record<string, NLUFrameRole> = {};
@@ -127,14 +118,12 @@ export const generateNLU = async (utterance: string): Promise<NLUData> => {
   return rawJson as NLUData;
 };
 
-/**
- * PHASE 2: Generate VISUAL-BLOCKS and PROMPT from NLU
- */
 export const generateVisualBlueprint = async (nlu: NLUData): Promise<{ visualBlocks: string; prompt: string }> => {
   const ai = getAI();
-  const systemInstruction = `You are a Visual Architect. Create a layout strategy from NLU data.
-  "visualBlocks" must be a comma-separated list of meaningful SVG IDs (e.g. "#human_body, #water_glass").
-  "prompt" is a technical drawing strategy for the SVG.
+  const systemInstruction = `You are a Visual Architect. Translate NLU semantics into a visual structure.
+  CRITICAL: You MUST map the Lexical Units and Frames from the NLU to specific SVG IDs.
+  "visualBlocks" must be a comma-separated list of IDs (e.g. "#agent_person, #theme_object").
+  "prompt" describes how to draw these blocks to represent the core action defined in the NLU frames.
   Return ONLY strictly valid JSON.`;
   
   const response = await ai.models.generateContent({
@@ -157,38 +146,27 @@ export const generateVisualBlueprint = async (nlu: NLUData): Promise<{ visualBlo
   return JSON.parse(cleanJSONResponse(response.text));
 };
 
-/**
- * PHASE 3: Generate SVG from VISUAL-BLOCKS and PROMPT
- */
 export const generateSVG = async (visualBlocks: string, prompt: string, row: any, config: GlobalConfig): Promise<string> => {
   const ai = getAI();
   const nluData = typeof row.nlu === 'object' ? row.nlu : JSON.parse(row.nlu || '{}');
-  const nluStr = JSON.stringify(nluData);
   
-  const systemInstruction = `You are an SVG Engineer expert in semantic accessibility and the PictoNet standard. 
-  Create a high-fidelity 100x100 semantic SVG pictogram for the utterance.
+  const systemInstruction = `You are an SVG Engineer expert. 
+  CRITICAL CASCADE RULE: You MUST use the NLU and the Visual Blueprint as the source of truth.
+  1. Use the utterance: "${row.text}".
+  2. The SVG <metadata> MUST include the Lexical Units and Frames found in the NLU JSON: ${JSON.stringify(nluData)}.
+  3. Every graphical group <g> MUST have an id that matches the IDs listed in the Visual Blueprint: ${visualBlocks}.
+  4. Follow the PictoNet standard for styling (.f for fills, .k for strokes).
+  5. The output MUST be a valid 100x100 SVG.
+  6. Ensure the 'title' and 'desc' tags are descriptive of the action described in the NLU.
   
-  MANDATORY STRUCTURE:
-  1. Standard SVG root: id="pictogram", xmlns="http://www.w3.org/2000/svg", version="1.1", viewBox="0 0 100 100", role="img", class="hc", aria-labelledby="title desc", lang="${config.lang}", tabindex="0", focusable="true".
-  2. <title id="title"> and <desc id="desc"> tags explaining the visual and its meaning.
-  3. <metadata id="mf-accessibility"> containing a JSON-LD object following the PictoNet schema (utterance, nsm, concepts, accessibility, provenance).
-  4. <defs> with internal <style>:
-     - .f, .k { stroke-linejoin: round; stroke-width: 1ex; }
-     - .f { fill: #fff; stroke: #000; }
-     - .k { fill: #000; stroke: #fff; }
-     - High contrast rules for svg.hc .f, svg.hc .k and .hc svg .f, .hc svg .k.
-  5. Graphical content using <g> and <path> elements with IDs corresponding to the VISUAL-BLOCKS provided.
-  6. A hidden <text> at x="-9999" y="-9999" with the utterance text.
-  
-  Use the provided prompt as a drawing strategy. Return ONLY the raw <svg> tag.`;
+  Return ONLY the raw <svg> tag. No conversational text.`;
 
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
-    contents: `UTTERANCE: "${row.text}". NLU: ${nluStr}. BLOCKS: ${visualBlocks}. STRATEGY: ${prompt}. CONFIG: ${JSON.stringify(config)}. Generate SVG:`,
+    contents: `STRATEGY: ${prompt}. Generate the high-fidelity semantic SVG following the strict metadata requirements.`,
     config: { systemInstruction }
   });
 
-  // For SVG we want to extract the <svg ... </svg> tag specifically if there's noise
   const text = response.text || '';
   const svgMatch = text.match(/<svg[\s\S]*?<\/svg>/i);
   if (svgMatch) return svgMatch[0];

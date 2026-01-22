@@ -8,8 +8,10 @@ import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig } from './types';
 import * as Gemini from './services/geminiService';
 import { CANONICAL_CSV } from './data/canonicalData';
 
-const STORAGE_KEY = 'pipeliner_v7_storage';
-const CONFIG_KEY = 'pipeliner_v7_config';
+const STORAGE_KEY = 'pipeliner_v9_storage';
+const CONFIG_KEY = 'pipeliner_v9_config';
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const PipelineIcon = ({ size = 24 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -118,20 +120,20 @@ const App: React.FC = () => {
       }
       return {
         id: `R_${Date.now()}_${i}`, 
-        text: parts[0], 
+        text: capitalize(parts[0]), 
         nlu: nlu,
         visualBlocks: (!parts[2] || parts[2] === '{empty}') ? undefined : parts[2], 
         prompt: (!parts[3] || parts[3] === '{empty}') ? undefined : parts[3], 
         svgCode: (!parts[4] || parts[4] === '{empty}') ? undefined : parts[4],
         status: (parts[4] && parts[4] !== '{empty}') ? 'completed' : 'idle',
-        nluStatus: (rawNlu && rawNlu !== '{empty}') ? 'completed' : 'idle',
+        nluStatus: (rawNlu && rawNlu !== '{empty}' && typeof nlu === 'object') ? 'completed' : 'idle',
         visualStatus: (parts[2] && parts[2] !== '{empty}') ? 'completed' : 'idle',
         svgStatus: (parts[4] && parts[4] !== '{empty}') ? 'completed' : 'idle'
       } as RowData;
     }).filter((r): r is RowData => r !== null);
     setRows(prev => [...newRows, ...prev]);
     setViewMode('list');
-    addLog('success', `Importación exitosa de ${newRows.length} filas.`);
+    addLog('success', `Importación: ${newRows.length} registros capitalizados.`);
   };
 
   const updateRow = (index: number, updates: Partial<RowData>) => {
@@ -149,28 +151,41 @@ const App: React.FC = () => {
     stopFlags.current[row.id] = false;
     const statusKey = `${step}Status` as keyof RowData;
     const durationKey = `${step}Duration` as keyof RowData;
+
     setRows(prev => {
       const next = [...prev];
       next[index] = { ...next[index], [statusKey]: 'processing' };
       return next;
     });
-    addLog('info', `Ejecutando ${step.toUpperCase()} para: "${row.text}"`);
+
     const startTime = Date.now();
     try {
       let result: any;
-      if (step === 'nlu') result = await Gemini.generateNLU(row.text);
-      else if (step === 'visual') {
-        const nluData = typeof row.nlu === 'string' ? JSON.parse(row.nlu) : row.nlu;
-        if (!nluData) throw new Error("NLU ausente");
+      if (step === 'nlu') {
+        result = await Gemini.generateNLU(row.text);
+      } else if (step === 'visual') {
+        // Validación profunda de NLU para evitar contaminación
+        let nluData = typeof row.nlu === 'string' ? null : row.nlu;
+        if (!nluData && typeof row.nlu === 'string') {
+          try { nluData = JSON.parse(row.nlu); } catch(e) { /* fail */ }
+        }
+        if (!nluData || typeof nluData !== 'object' || !('frames' in nluData)) {
+          addLog('error', "NLU corrupto o ausente. Reparando...");
+          const repair = await Gemini.generateNLU(row.text);
+          updateRow(index, { nlu: repair, nluStatus: 'completed' });
+          nluData = repair;
+        }
         result = await Gemini.generateVisualBlueprint(nluData as NLUData);
       } else if (step === 'svg') {
-        if (!row.visualBlocks || !row.prompt) throw new Error("Faltan Bloques Visuales o Prompt.");
+        if (!row.visualBlocks || !row.prompt) throw new Error("Faltan recursos visuales.");
         result = await Gemini.generateSVG(row.visualBlocks, row.prompt, row, config);
       }
+
       if (stopFlags.current[row.id]) {
         updateRow(index, { [statusKey]: 'idle' });
         return false;
       }
+
       const duration = (Date.now() - startTime) / 1000;
       updateRow(index, { 
         [statusKey]: 'completed', 
@@ -179,11 +194,11 @@ const App: React.FC = () => {
         ...(step === 'visual' ? { visualBlocks: result.visualBlocks, prompt: result.prompt } : {}),
         ...(step === 'svg' ? { svgCode: result, status: 'completed' } : {})
       });
-      addLog('success', `${step.toUpperCase()} terminado en ${duration.toFixed(1)}s`);
+      addLog('success', `${step.toUpperCase()} finalizado.`);
       return true;
     } catch (err: any) {
       updateRow(index, { [statusKey]: 'error' });
-      addLog('error', `Error: ${err.message || "Fallo inesperado"}`);
+      addLog('error', `${step.toUpperCase()} Error: ${err.message}`);
       return false;
     }
   };
@@ -203,7 +218,7 @@ const App: React.FC = () => {
     const blob = new Blob([headers.join('\t') + '\n' + content], { type: 'text/tab-separated-values' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `pipeliner_full_export_${new Date().toISOString().slice(0,10)}.tsv`;
+    a.download = `pipeline_export_${new Date().getTime()}.tsv`;
     a.click();
   };
 
@@ -211,20 +226,14 @@ const App: React.FC = () => {
     if(e.key === 'Enter') {
       const match = rows.find(r => r.text.toLowerCase() === searchValue.toLowerCase());
       if (match) {
-        setViewMode('list');
-        setOpenRowId(match.id);
+        setViewMode('list'); setOpenRowId(match.id);
         setTimeout(() => rowRefs.current[match.id]?.scrollIntoView({ behavior:'smooth', block:'center' }), 100);
         setSearchValue('');
       } else if(searchValue.trim()) {
         const id = `U_${Date.now()}`;
-        const newRow: RowData = {id, text: searchValue, status:'idle', nluStatus:'idle', visualStatus:'idle', svgStatus:'idle'};
-        setRows([newRow, ...rows]);
-        setViewMode('list');
-        setSearchValue('');
-        setTimeout(() => {
-          setOpenRowId(id);
-          rowRefs.current[id]?.scrollIntoView({ behavior:'smooth', block:'center' });
-        }, 150);
+        setRows([{id, text: capitalize(searchValue), status:'idle', nluStatus:'idle', visualStatus:'idle', svgStatus:'idle'}, ...rows]);
+        setViewMode('list'); setSearchValue('');
+        setTimeout(() => { setOpenRowId(id); rowRefs.current[id]?.scrollIntoView({ behavior:'smooth', block:'center' }); }, 150);
       }
     }
   };
@@ -232,61 +241,61 @@ const App: React.FC = () => {
   const suggestions = useMemo(() => searchValue ? rows.filter(r => r.text.toLowerCase().includes(searchValue.toLowerCase())).slice(0, 5) : [], [searchValue, rows]);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans selection:bg-violet-200 selection:text-violet-950">
-      <header className="h-20 sticky top-0 bg-white border-b z-40 flex items-center px-10 justify-between shadow-sm">
+    <div className="min-h-screen bg-slate-50 flex flex-col selection:bg-violet-950 selection:text-white">
+      <header className="h-20 sticky top-0 bg-white border-b border-slate-200 z-40 flex items-center px-10 justify-between shadow-sm">
         <div className="flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setViewMode('home')}>
-          <div className="bg-violet-950 p-3 rounded-md text-white">
+          <div className="bg-violet-950 p-3 text-white">
             <PipelineIcon size={28} />
           </div>
           <div>
-            <h1 className="font-black uppercase tracking-tight text-2xl leading-none text-slate-900">PipeLiner <span className="text-violet-950">v1.2</span></h1>
-            <span className="text-xs text-slate-400 font-mono tracking-widest uppercase">{rows.length} Filas Cargadas</span>
+            <h1 className="font-black uppercase tracking-tight text-2xl leading-none text-slate-900">PipeLiner <span className="text-violet-950">Architect.</span></h1>
+            <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">{rows.length} Registros</span>
           </div>
         </div>
 
         <div className="flex-1 max-w-2xl mx-12 relative">
-          <div className={`flex items-center bg-slate-100 rounded-md px-6 py-3 border-2 transition-all ${isSearching ? 'border-violet-950 bg-white ring-4 ring-violet-50' : 'border-transparent'}`}>
+          <div className={`flex items-center bg-slate-100 px-6 py-3 border-2 transition-all ${isSearching ? 'border-violet-950 bg-white ring-4 ring-slate-100' : 'border-transparent'}`}>
             <Search size={20} className="text-slate-400" />
             <input 
               ref={searchInputRef} value={searchValue} onFocus={() => setIsSearching(true)} onBlur={() => setTimeout(() => setIsSearching(false), 200)}
               onChange={(e) => setSearchValue(e.target.value)} onKeyDown={handleSearch}
-              placeholder="Buscar o crear nueva frase..." className="flex-1 bg-transparent border-none focus:ring-0 text-lg font-semibold ml-4"
+              placeholder="¿Qué quieres proyectar?..." className="flex-1 bg-transparent border-none focus:ring-0 text-lg font-bold ml-4 placeholder:text-slate-300"
             />
           </div>
           {isSearching && suggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white border rounded-md shadow-2xl z-50 overflow-hidden border-violet-100">
-              {suggestions.map(s => <div key={s.id} onClick={() => { setViewMode('list'); setOpenRowId(s.id); setTimeout(() => rowRefs.current[s.id]?.scrollIntoView({behavior:'smooth'}), 100); setSearchValue(''); }} className="p-4 hover:bg-violet-50 cursor-pointer text-base font-bold flex items-center justify-between border-b last:border-0"><span>{s.text}</span> <ArrowRight size={18} className="text-violet-300"/></div>)}
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 shadow-2xl z-50 overflow-hidden">
+              {suggestions.map(s => <div key={s.id} onClick={() => { setViewMode('list'); setOpenRowId(s.id); setTimeout(() => rowRefs.current[s.id]?.scrollIntoView({behavior:'smooth'}), 100); setSearchValue(''); }} className="p-4 hover:bg-violet-50 cursor-pointer text-sm font-bold flex items-center justify-between border-b last:border-0 border-slate-100"><span>{s.text}</span> <ArrowRight size={16} className="text-violet-300"/></div>)}
             </div>
           )}
         </div>
 
-        <div className="flex gap-4">
-          {rows.length > 0 && <button onClick={exportTSV} className="bg-slate-900 text-white px-6 py-3 rounded-md text-sm font-bold flex items-center gap-3 hover:bg-slate-800 transition-all active:scale-95 shadow-md"><Download size={18}/> Exportar</button>}
-          <button onClick={() => setShowConfig(!showConfig)} className={`p-3 rounded-md transition-colors border-2 ${showConfig ? 'bg-violet-100 text-violet-950 border-violet-950' : 'hover:bg-slate-100 text-slate-400 border-transparent'}`}><Sliders size={24}/></button>
-          <button onClick={() => setShowConsole(!showConsole)} className="p-3 hover:bg-slate-100 rounded-md text-slate-400 border-2 border-transparent"><Terminal size={24}/></button>
+        <div className="flex gap-3">
+          {rows.length > 0 && <button onClick={exportTSV} className="bg-slate-900 text-white px-5 py-3 text-[10px] font-black uppercase tracking-widest flex items-center gap-3 hover:bg-black transition-all shadow-md active:scale-95"><Download size={14}/> TSV Export</button>}
+          <button onClick={() => setShowConfig(!showConfig)} className={`p-3 border-2 transition-colors ${showConfig ? 'bg-violet-100 text-violet-950 border-violet-950' : 'hover:bg-slate-100 text-slate-400 border-transparent'}`}><Sliders size={20}/></button>
+          <button onClick={() => setShowConsole(!showConsole)} className="p-3 hover:bg-slate-100 text-slate-400 border-2 border-transparent"><Terminal size={20}/></button>
         </div>
       </header>
 
       {showConfig && (
-        <div className="bg-white border-b px-10 py-8 animate-in slide-in-from-top duration-300 shadow-inner">
+        <div className="bg-white border-b border-slate-200 px-10 py-8 animate-in slide-in-from-top duration-300">
           <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-10 items-end">
             <div>
-              <label className="block text-xs font-black uppercase text-slate-400 mb-3 tracking-widest">Idioma SVG</label>
-              <input type="text" value={config.lang} onChange={e => setConfig({...config, lang: e.target.value})} className="w-full text-base border-2 border-slate-100 rounded-md px-4 py-3 outline-none focus:border-violet-950" />
+              <label className="block text-[10px] font-black uppercase text-slate-400 mb-2 tracking-[0.2em]">SVG Default Lang</label>
+              <input type="text" value={config.lang} onChange={e => setConfig({...config, lang: e.target.value})} className="w-full text-xs border border-slate-200 px-4 py-2 outline-none focus:border-violet-950" />
             </div>
             <div>
-              <label className="block text-xs font-black uppercase text-slate-400 mb-3 tracking-widest">ViewBox Canvas</label>
-              <input type="number" value={config.svgSize} onChange={e => setConfig({...config, svgSize: parseInt(e.target.value)})} className="w-full text-base border-2 border-slate-100 rounded-md px-4 py-3 outline-none focus:border-violet-950" />
+              <label className="block text-[10px] font-black uppercase text-slate-400 mb-2 tracking-[0.2em]">ViewBox Dimension</label>
+              <input type="number" value={config.svgSize} onChange={e => setConfig({...config, svgSize: parseInt(e.target.value)})} className="w-full text-xs border border-slate-200 px-4 py-2 outline-none focus:border-violet-950" />
             </div>
             <div>
-              <label className="block text-xs font-black uppercase text-slate-400 mb-3 tracking-widest">Copyright Metadata</label>
-              <div className="flex gap-4">
-                <input type="text" value={config.author} onChange={e => setConfig({...config, author: e.target.value})} className="w-full text-base border-2 border-slate-100 rounded-md px-4 py-3 outline-none focus:border-violet-950" placeholder="Autor" />
-                <input type="text" value={config.license} onChange={e => setConfig({...config, license: e.target.value})} className="w-full text-base border-2 border-slate-100 rounded-md px-4 py-3 outline-none focus:border-violet-950" placeholder="Licencia" />
+              <label className="block text-[10px] font-black uppercase text-slate-400 mb-2 tracking-[0.2em]">Metadata Signature</label>
+              <div className="flex gap-2">
+                <input type="text" value={config.author} onChange={e => setConfig({...config, author: e.target.value})} className="w-full text-xs border border-slate-200 px-4 py-2 outline-none focus:border-violet-950" placeholder="Autor" />
+                <input type="text" value={config.license} onChange={e => setConfig({...config, license: e.target.value})} className="w-full text-xs border border-slate-200 px-4 py-2 outline-none focus:border-violet-950" placeholder="Licencia" />
               </div>
             </div>
             <div className="flex justify-end">
-               <button onClick={() => setShowConfig(false)} className="text-sm font-bold text-violet-950 bg-violet-50 px-8 py-4 rounded-md hover:bg-violet-100 transition-all border border-violet-200">Guardar Cambios</button>
+               <button onClick={() => setShowConfig(false)} className="text-[10px] font-black uppercase text-violet-950 bg-violet-50 px-6 py-3 hover:bg-violet-100 transition-all border border-violet-200 tracking-widest">Cerrar</button>
             </div>
           </div>
         </div>
@@ -295,57 +304,57 @@ const App: React.FC = () => {
       <main className="flex-1 p-10 max-w-7xl mx-auto w-full">
         {viewMode === 'home' ? (
           <div className="py-24 text-center space-y-16 max-w-5xl mx-auto animate-in fade-in zoom-in-95 duration-500">
-            <div className="space-y-6">
-              <div className="inline-flex gap-4 bg-violet-50 text-violet-950 px-6 py-2 rounded-full text-xs font-black uppercase tracking-[0.25em] border border-violet-200 shadow-sm">
-                <Sparkles size={18}/> Semantic Pictogram Engine
+            <div className="space-y-4">
+              <div className="inline-flex gap-4 bg-violet-950 text-white px-6 py-2 text-[10px] font-black uppercase tracking-[0.4em] shadow-lg">
+                <Sparkles size={14}/> Semantic High Fidelity Engine
               </div>
-              <h2 className="text-8xl font-black tracking-tighter text-slate-900 leading-none">
-                PipeLiner <span className="text-violet-950">Architect.</span>
+              <h2 className="text-9xl font-black tracking-tighter text-slate-900 leading-none">
+                PIPELINE <span className="text-violet-950">V9.</span>
               </h2>
-              <p className="text-slate-500 text-2xl font-medium max-w-3xl mx-auto leading-relaxed">
-                Transformación de lenguaje natural a esquemas NLU MediaFranca y pictogramas SVG semánticos de alta fidelidad.
+              <p className="text-slate-400 text-xl font-medium max-w-2xl mx-auto leading-relaxed italic">
+                Validación semántica estricta y flujos de cascada blindados. Accesibilidad nativa mediante capitalización inteligente.
               </p>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="bg-white p-10 rounded-md border-2 border-slate-100 text-left space-y-6 shadow-xl hover:border-violet-200 transition-all group">
-                <div className="bg-amber-50 text-amber-600 p-4 rounded-md w-fit group-hover:scale-110 transition-transform"><FileDown size={32}/></div>
-                <h3 className="font-bold text-2xl text-slate-800">Estructura NLU</h3>
-                <p className="text-base text-slate-500 leading-relaxed">Define frames y roles semánticos bajo el estándar MediaFranca.</p>
-                <button onClick={() => { const content = "UTTERANCE\tNLU\tVISUAL-BLOCKS\tPROMPT\tSVG\nQuiero beber agua.\t{empty}\t{empty}\t{empty}\t{empty}"; const blob = new Blob([content], { type: 'text/tab-separated-values' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = "pipeliner_template.tsv"; a.click(); }} className="w-full py-4 bg-slate-900 text-white hover:bg-violet-900 rounded-md text-sm font-black transition-all shadow-lg active:scale-95">Descargar Plantilla</button>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white p-10 border border-slate-200 text-left space-y-4 shadow-xl hover:border-violet-950 transition-all group">
+                <div className="text-amber-600"><FileDown size={32}/></div>
+                <h3 className="font-black text-lg uppercase tracking-wider text-slate-900">Blueprint</h3>
+                <p className="text-sm text-slate-500 leading-relaxed">Carga TSV/CSV. Se capitalizará cada enunciado al vuelo.</p>
+                <button onClick={() => { const content = "UTTERANCE\tNLU\tVISUAL-BLOCKS\tPROMPT\tSVG\nQuiero beber agua.\t{empty}\t{empty}\t{empty}\t{empty}"; const blob = new Blob([content], { type: 'text/tab-separated-values' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = "template.tsv"; a.click(); }} className="w-full py-3 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest shadow-lg">Template</button>
               </div>
 
-              <div className="bg-white p-10 rounded-md border-2 border-slate-100 text-left space-y-6 shadow-xl hover:border-violet-200 transition-all group">
-                <div className="bg-emerald-50 text-emerald-600 p-4 rounded-md w-fit group-hover:scale-110 transition-transform"><BookOpen size={32}/></div>
-                <h3 className="font-bold text-2xl text-slate-800">Dataset Canónico</h3>
-                <p className="text-base text-slate-500 leading-relaxed">Carga frases pre-configuradas para probar la potencia del motor.</p>
-                <button onClick={() => processContent(CANONICAL_CSV)} className="w-full py-4 bg-violet-50 text-violet-950 hover:bg-violet-950 hover:text-white rounded-md text-sm font-black flex items-center justify-center gap-3 transition-all border border-violet-200 active:scale-95 shadow-md">Cargar Muestrario</button>
+              <div className="bg-white p-10 border border-slate-200 text-left space-y-4 shadow-xl hover:border-violet-950 transition-all group">
+                <div className="text-emerald-600"><BookOpen size={32}/></div>
+                <h3 className="font-black text-lg uppercase tracking-wider text-slate-900">Canon</h3>
+                <p className="text-sm text-slate-500 leading-relaxed">Set de datos verificado. NLU pre-validado para cascada.</p>
+                <button onClick={() => processContent(CANONICAL_CSV)} className="w-full py-3 bg-violet-50 text-violet-950 border border-violet-200 text-[10px] font-black uppercase tracking-widest shadow-sm">Load Canon</button>
               </div>
 
-              <div className="bg-violet-950 p-10 rounded-md text-left space-y-6 shadow-xl hover:bg-black transition-all group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                <div className="bg-white/20 text-white p-4 rounded-md w-fit group-hover:-translate-y-1 transition-transform"><Upload size={32}/></div>
-                <h3 className="font-bold text-2xl text-white">Importar Propio</h3>
-                <p className="text-base text-violet-100 leading-relaxed">Sube tus propios archivos TSV o CSV estructurados para iniciar el pipeline.</p>
-                <div className="text-sm font-black text-white bg-violet-900 px-6 py-3 rounded-md text-center shadow-inner">Seleccionar Archivo</div>
+              <div className="bg-violet-950 p-10 text-left space-y-4 shadow-xl hover:bg-black transition-all group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                <div className="text-white"><Upload size={32}/></div>
+                <h3 className="font-black text-lg uppercase tracking-wider text-white">Manual</h3>
+                <p className="text-sm text-violet-200 leading-relaxed">Sube archivos personalizados. El sistema saneará el JSON.</p>
+                <div className="text-[10px] font-black text-white bg-violet-800 px-6 py-3 text-center border border-violet-700 uppercase tracking-widest">Select File</div>
                 <input ref={fileInputRef} type="file" className="hidden" onChange={e => e.target.files?.[0]?.text().then(processContent)}/>
               </div>
             </div>
 
             {rows.length > 0 && (
-              <button onClick={() => setViewMode('list')} className="text-violet-950 font-black text-lg flex items-center gap-3 mx-auto hover:underline bg-white px-10 py-5 rounded-full border shadow-lg transition-all active:scale-95">
-                Volver al listado activo ({rows.length} frases) <ArrowRight size={20}/>
+              <button onClick={() => setViewMode('list')} className="text-violet-950 font-black text-xs uppercase tracking-[0.3em] flex items-center gap-4 mx-auto hover:bg-violet-50 px-10 py-5 border-2 border-violet-950 transition-all">
+                Abrir WorkBench ({rows.length}) <ArrowRight size={18}/>
               </button>
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-6 pb-48 animate-in fade-in slide-in-from-bottom-8 duration-500">
+          <div className="flex flex-col gap-4 pb-48 animate-in fade-in slide-in-from-bottom-8 duration-500">
             {rows.map((row, idx) => (
               <RowComponent 
                 key={row.id} row={row} isOpen={openRowId === row.id} setIsOpen={v => setOpenRowId(v ? row.id : null)}
                 onUpdate={u => updateRow(idx, u)} domRef={el => rowRefs.current[row.id] = el}
                 onProcessStep={s => processStep(idx, s)} onStopStep={() => stopFlags.current[row.id] = true}
                 onRunCascade={() => { processStep(idx, 'nlu').then(ok => ok && processStep(idx, 'visual').then(ok2 => ok2 && processStep(idx, 'svg'))); }}
-                onDelete={() => { if(confirm("¿Eliminar fila permanentemente?")) setRows(prev => prev.filter(r => r.id !== row.id)); }}
+                onDelete={() => { if(confirm("¿Eliminar registro?")) setRows(prev => prev.filter(r => r.id !== row.id)); }}
               />
             ))}
           </div>
@@ -353,16 +362,16 @@ const App: React.FC = () => {
       </main>
 
       {showConsole && (
-        <div className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-violet-200 font-mono text-[13px] p-6 z-50 border-t-4 border-white/10 overflow-auto shadow-2xl">
-          <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10 uppercase tracking-[0.3em] text-slate-500 font-black">
-            <span className="flex items-center gap-4 text-sm"><Terminal size={18}/> System Trace Console</span> 
-            <button onClick={() => setLogs([])} className="hover:text-rose-400 text-xs bg-white/5 px-6 py-2 rounded-md border border-white/5">FLUSH BUFFER</button>
+        <div className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-400 mono text-[11px] p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl">
+          <div className="flex justify-between items-center mb-6 pb-2 border-b border-slate-900 font-black tracking-widest text-[10px] uppercase">
+            <span className="flex items-center gap-3"><Terminal size={14}/> Semantic Monitor</span> 
+            <button onClick={() => setLogs([])} className="hover:text-white transition-colors">Flush Logs</button>
           </div>
           {logs.slice().reverse().map(l => (
-            <div key={l.id} className="flex gap-6 leading-relaxed py-2 border-b border-white/5 last:border-0 hover:bg-white/5 px-4 rounded-md transition-colors">
-              <span className="opacity-40 shrink-0">[{l.timestamp}]</span>
-              <span className={`font-black shrink-0 w-20 text-center ${l.type === 'error' ? 'text-rose-500' : 'text-emerald-500'}`}>{l.type.toUpperCase()}</span>
-              <span className="break-all text-slate-300">{l.message}</span>
+            <div key={l.id} className="flex gap-4 leading-relaxed py-1 border-b border-slate-900 last:border-0">
+              <span className="opacity-30">[{l.timestamp}]</span>
+              <span className={`font-black w-16 text-center ${l.type === 'error' ? 'text-rose-600' : 'text-emerald-600'}`}>{l.type.toUpperCase()}</span>
+              <span className="break-all">{l.message}</span>
             </div>
           ))}
         </div>
@@ -378,51 +387,49 @@ const RowComponent: React.FC<{
   onRunCascade: () => void; onDelete: () => void;
 }> = ({ row, isOpen, setIsOpen, onUpdate, domRef, onProcessStep, onStopStep, onRunCascade, onDelete }) => {
   const getBG = (status: StepStatus) => {
-    if (status === 'processing') return 'bg-violet-50/50 border-violet-200 animate-pulse';
-    if (status === 'completed') return 'bg-emerald-50/30 border-emerald-100';
-    if (status === 'outdated') return 'bg-amber-50/60 border-amber-200';
-    if (status === 'error') return 'bg-rose-50/60 border-rose-200';
-    return 'bg-white border-slate-200 shadow-sm';
+    if (status === 'processing') return 'bg-orange-50/20 border-orange-300';
+    if (status === 'completed') return 'bg-emerald-50/20 border-emerald-100';
+    if (status === 'error') return 'bg-rose-50/20 border-rose-200';
+    return 'bg-white border-slate-200';
   };
 
   return (
-    <div ref={domRef} className={`rounded-md border-2 transition-all duration-300 ${isOpen ? 'ring-8 ring-violet-950/5 shadow-3xl z-20 translate-x-2' : 'hover:border-violet-300 hover:shadow-xl'} ${getBG(isOpen ? 'idle' : 'idle')}`}>
-      <div className="p-6 flex items-center gap-10 cursor-pointer group" onClick={() => setIsOpen(!isOpen)}>
-        <div className="flex-1 text-xl font-bold text-slate-800 truncate px-2 leading-tight">{row.text}</div>
-        <div className="flex gap-4 shrink-0">
+    <div ref={domRef} className={`border-2 transition-all duration-300 ${isOpen ? 'ring-8 ring-slate-100 shadow-3xl z-20 border-violet-950 translate-x-1' : 'hover:border-slate-300'} ${getBG(isOpen ? 'idle' : 'idle')}`}>
+      <div className="p-5 flex items-center gap-8 cursor-pointer group" onClick={() => setIsOpen(!isOpen)}>
+        <div className="flex-1 text-lg font-black text-slate-900 truncate leading-none uppercase tracking-tight">{row.text}</div>
+        <div className="flex gap-2 shrink-0">
           <Badge label="NLU" status={row.nluStatus} />
           <Badge label="BLU" status={row.visualStatus} />
           <Badge label="PIC" status={row.svgStatus} />
         </div>
-        <div className="w-16 h-16 bg-white border-2 border-slate-50 rounded-md flex items-center justify-center p-1 shadow-inner overflow-hidden shrink-0 transition-transform group-hover:scale-125 group-hover:rotate-6 shadow-md" 
+        <div className="w-14 h-14 bg-white border border-slate-100 flex items-center justify-center p-1 shadow-inner overflow-hidden shrink-0 transition-all group-hover:scale-110" 
              dangerouslySetInnerHTML={{ __html: (row.svgCode || '').includes('<svg') ? row.svgCode! : '' }} />
-        <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-all ml-4">
-          <button onClick={e => { e.stopPropagation(); onRunCascade(); }} className="p-3 bg-violet-950 text-white rounded-md shadow-xl active:scale-90 hover:bg-black transition-all" title="Correr Pipeline"><PlayCircle size={24}/></button>
-          <button onClick={e => { e.stopPropagation(); onDelete(); }} className="p-3 bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white rounded-md active:scale-90 transition-all border border-rose-100" title="Eliminar"><Trash2 size={24}/></button>
+        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all ml-2">
+          <button onClick={e => { e.stopPropagation(); onRunCascade(); }} className="p-3 bg-violet-950 text-white shadow-xl hover:bg-black transition-all" title="Cascada"><PlayCircle size={18}/></button>
+          <button onClick={e => { e.stopPropagation(); onDelete(); }} className="p-3 bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white transition-all border border-rose-100" title="Delete"><Trash2 size={18}/></button>
         </div>
-        <ChevronDown size={24} className={`text-slate-300 transition-transform duration-500 ${isOpen ? 'rotate-180 text-violet-950' : ''}`} />
+        <ChevronDown size={20} className={`text-slate-300 transition-transform duration-500 ${isOpen ? 'rotate-180 text-violet-950' : ''}`} />
       </div>
 
       {isOpen && (
-        <div className="p-8 border-t-2 border-slate-100 grid grid-cols-1 lg:grid-cols-3 gap-10 bg-slate-50/50 rounded-b-md animate-in slide-in-from-top-4 duration-300">
-          <StepBox title="1. NLU Schema" status={row.nluStatus} onAction={() => onProcessStep('nlu')} onStop={onStopStep} bg={getBG(row.nluStatus)}>
-            <div className="h-full bg-white rounded-md border-2 border-slate-100 p-6 font-mono text-[13px] overflow-auto max-h-[500px] leading-relaxed shadow-inner">
-              <pre className="text-violet-950">{typeof row.nlu === 'object' ? JSON.stringify(row.nlu, null, 2) : (row.nlu || '// Sin datos NLU')}</pre>
+        <div className="p-8 border-t border-slate-200 grid grid-cols-1 lg:grid-cols-3 gap-8 bg-slate-50/50 animate-in slide-in-from-top-2">
+          <StepBox title="Semantic NLU" status={row.nluStatus} onAction={() => onProcessStep('nlu')} onStop={onStopStep} bg={getBG(row.nluStatus)}>
+            <div className="h-full bg-white border border-slate-200 p-4 mono text-[11px] overflow-auto max-h-[450px] shadow-inner">
+              <pre className="text-violet-900">{typeof row.nlu === 'object' ? JSON.stringify(row.nlu, null, 2) : (row.nlu || '// Empty buffer')}</pre>
             </div>
           </StepBox>
-          <StepBox title="2. Visual Blueprint" status={row.visualStatus} onAction={() => onProcessStep('visual')} onStop={onStopStep} bg={getBG(row.visualStatus)}>
-             <div className="space-y-6 flex flex-col h-full">
-               <textarea value={row.visualBlocks || ''} onChange={e => onUpdate({visualBlocks: e.target.value})} className="flex-1 w-full bg-white border-2 border-slate-100 rounded-md p-6 text-base font-bold outline-none focus:border-violet-950 resize-none shadow-inner" placeholder="Ejem: #human_head, #bed_base..." />
-               <textarea value={row.prompt || ''} onChange={e => onUpdate({prompt: e.target.value})} className="h-32 w-full bg-white border-2 border-slate-100 rounded-md p-6 text-sm italic text-slate-500 outline-none focus:border-violet-950 resize-none shadow-inner" placeholder="Estrategia de dibujo..." />
+          <StepBox title="Visual Layout" status={row.visualStatus} onAction={() => onProcessStep('visual')} onStop={onStopStep} bg={getBG(row.visualStatus)}>
+             <div className="space-y-4 flex flex-col h-full">
+               <textarea value={row.visualBlocks || ''} onChange={e => onUpdate({visualBlocks: e.target.value})} className="flex-1 w-full bg-white border border-slate-200 p-4 text-xs font-bold outline-none focus:border-violet-950 resize-none shadow-inner" placeholder="Blocks & IDs..." />
+               <textarea value={row.prompt || ''} onChange={e => onUpdate({prompt: e.target.value})} className="h-24 w-full bg-white border border-slate-200 p-4 text-[10px] italic text-slate-500 outline-none focus:border-violet-950 resize-none shadow-inner" placeholder="Drawing prompt..." />
              </div>
           </StepBox>
-          <StepBox title="3. Semantic Pictogram" status={row.svgStatus} onAction={() => onProcessStep('svg')} onStop={onStopStep} bg={getBG(row.svgStatus)}>
-            <div className="space-y-6 flex flex-col h-full">
-              <textarea value={row.svgCode || ''} onChange={e => onUpdate({svgCode: e.target.value})} className="flex-1 w-full bg-slate-950 text-emerald-400 border-none rounded-md p-6 text-[12px] font-mono leading-relaxed resize-none shadow-2xl" placeholder="SVG code..." />
-              <div className="h-56 bg-white border-2 border-slate-100 rounded-md flex items-center justify-center overflow-hidden relative shadow-inner p-4 group/preview">
-                 <div className="w-full h-full flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full transition-all group-hover/preview:scale-110" 
-                      dangerouslySetInnerHTML={{ __html: (row.svgCode || '').includes('<svg') ? row.svgCode! : '<div class="text-sm font-black text-slate-200 uppercase tracking-[0.2em]">Esperando Render</div>' }} />
-                 <div className="absolute top-4 right-4 bg-slate-900/70 text-white text-[10px] px-3 py-1.5 rounded-md opacity-0 group-hover/preview:opacity-100 transition-opacity backdrop-blur-sm">Picto Preview</div>
+          <StepBox title="SVG Pictogram" status={row.svgStatus} onAction={() => onProcessStep('svg')} onStop={onStopStep} bg={getBG(row.svgStatus)}>
+            <div className="space-y-4 flex flex-col h-full">
+              <textarea value={row.svgCode || ''} onChange={e => onUpdate({svgCode: e.target.value})} className="flex-1 w-full bg-slate-950 text-emerald-500 border-none p-4 mono text-[10px] leading-relaxed resize-none shadow-2xl" placeholder="SVG XML..." />
+              <div className="h-48 bg-white border border-slate-200 flex items-center justify-center overflow-hidden relative shadow-inner p-4 group/preview">
+                 <div className="w-full h-full flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:max-w-full [&>svg]:max-h-full transition-all group-hover/preview:scale-105" 
+                      dangerouslySetInnerHTML={{ __html: (row.svgCode || '').includes('<svg') ? row.svgCode! : '<div class="text-[10px] font-black text-slate-200 uppercase tracking-widest">Renderer Inactive</div>' }} />
               </div>
             </div>
           </StepBox>
@@ -439,31 +446,29 @@ const StepBox: React.FC<{ title: string; status: StepStatus; onAction: () => voi
     let interval: number;
     if (status === 'processing') {
       setElapsed(0);
-      interval = window.setInterval(() => {
-        setElapsed(prev => prev + 1);
-      }, 1000);
+      interval = window.setInterval(() => { setElapsed(prev => prev + 1); }, 1000);
     }
     return () => window.clearInterval(interval);
   }, [status]);
 
   return (
-    <div className={`flex flex-col gap-6 min-h-[550px] transition-colors p-8 rounded-md border-2 ${bg} shadow-sm`}>
-      <div className="flex items-center justify-between px-2">
-        <h4 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">{title}</h4>
+    <div className={`flex flex-col gap-4 min-h-[500px] transition-colors p-6 border ${bg}`}>
+      <div className="flex items-center justify-between">
+        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{title}</h4>
         <div className="flex items-center gap-3">
           {status === 'processing' ? (
             <>
-              <span className="text-xs font-mono text-slate-400 font-black opacity-60 animate-in fade-in duration-300">{elapsed}s</span>
+              <span className="text-[10px] mono text-slate-400 font-bold opacity-60 animate-in fade-in duration-300">{elapsed}s</span>
               <button 
                 onClick={onStop} 
-                className="p-3 text-white rounded-md shadow-xl hover:opacity-95 transition-all border-b-4 border-orange-800 active:border-b-0 active:translate-y-1 animate-generative" 
-                title="Abortar"
+                className="p-3 text-white shadow-xl hover:opacity-90 transition-all active:translate-y-1 animate-spectral" 
+                title="Abort Session"
               >
-                <StopCircle size={20}/>
+                <StopCircle size={16}/>
               </button>
             </>
           ) : (
-            <button onClick={onAction} className="p-3 bg-white border-2 border-slate-100 hover:border-violet-950 hover:text-violet-950 rounded-md shadow-lg transition-all active:scale-95 active:shadow-sm" title="Regenerar"><RefreshCw size={20}/></button>
+            <button onClick={onAction} className="p-3 bg-white border border-slate-200 hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all shadow-sm active:scale-95" title="Regenerate"><RefreshCw size={16}/></button>
           )}
         </div>
       </div>
@@ -474,13 +479,13 @@ const StepBox: React.FC<{ title: string; status: StepStatus; onAction: () => voi
 
 const Badge: React.FC<{ label: string; status: StepStatus }> = ({ label, status }) => {
   const styles = {
-    idle: 'bg-slate-100 text-slate-400 border-transparent',
-    processing: 'bg-orange-100 text-orange-600 animate-pulse border-orange-200',
-    completed: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    outdated: 'bg-amber-100 text-amber-800 border-amber-200',
-    error: 'bg-rose-100 text-rose-700 border-rose-200'
+    idle: 'bg-slate-50 text-slate-300 border-slate-100',
+    processing: 'bg-orange-50 text-orange-600 animate-pulse border-orange-200',
+    completed: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    outdated: 'bg-amber-50 text-amber-800 border-amber-100',
+    error: 'bg-rose-50 text-rose-700 border-rose-100'
   };
-  return <div className={`px-4 py-2 rounded-md text-[12px] font-black uppercase tracking-widest border-2 transition-all ${styles[status]}`}>{label}</div>;
+  return <div className={`px-3 py-1.5 text-[9px] font-black uppercase tracking-widest border transition-all ${styles[status]}`}>{label}</div>;
 };
 
 export default App;
