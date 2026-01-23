@@ -3,21 +3,19 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { 
   Upload, Download, Trash2, Terminal, RefreshCw, ChevronDown, 
   PlayCircle, BookOpen, Search, FileDown, StopCircle, Sparkles, Sliders,
-  X, Code, Plus
+  X, Code, Plus, FileText
 } from 'lucide-react';
 import { RowData, LogEntry, StepStatus, NLUData, GlobalConfig, VOCAB } from './types';
 import * as Gemini from './services/geminiService';
 import { CANONICAL_DATA } from './data/canonicalData';
 
-const STORAGE_KEY = 'pipeliner_v14_storage';
-const CONFIG_KEY = 'pipeliner_v14_config';
-
-const capitalize = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+const STORAGE_KEY = 'pipeliner_v15_storage';
+const CONFIG_KEY = 'pipeliner_v15_config';
 
 const PipelineIcon = ({ size = 24 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
     <line x1="3" y1="12" x2="21" y2="12" />
-    <circle cx="4" cy="12" r="3" fill="currentColor" stroke="none" />
+    <circle cx="3" cy="12" r="3" fill="currentColor" stroke="none" />
     <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
     <circle cx="21" cy="12" r="3" fill="currentColor" stroke="none" />
   </svg>
@@ -32,7 +30,7 @@ const App: React.FC = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [openRowId, setOpenRowId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'home' | 'list'>('home');
-  const [config, setConfig] = useState<GlobalConfig>({ lang: 'es-ES', svgSize: 100, author: 'PictoNet', license: 'CC BY 4.0' });
+  const [config, setConfig] = useState<GlobalConfig>({ lang: 'es-ES', width: 100, height: 100, author: 'PictoNet', license: 'CC BY 4.0' });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const stopFlags = useRef<Record<string, boolean>>({});
@@ -53,59 +51,33 @@ const App: React.FC = () => {
     setLogs(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), timestamp: new Date().toLocaleTimeString(), type, message }]);
   };
 
-  const processContent = (text: string) => {
+  const processPhrases = (text: string) => {
     try {
-      const data = JSON.parse(text);
-      const items = Array.isArray(data) ? data : [data];
-      const newRows: RowData[] = items.map((item, i) => ({
-        id: item.id || `R_${Date.now()}_${i}`,
-        UTTERANCE: item.UTTERANCE || item.utterance || "",
-        NLU: item.NLU || item.nlu,
-        "VISUAL-BLOCKS": item["VISUAL-BLOCKS"] || item["visual-blocks"],
-        PROMPT: item.PROMPT || item.prompt,
-        SVG: item.SVG || item.svg,
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      const newRows: RowData[] = lines.map((phrase, i) => ({
+        id: `R_PHRASE_${Date.now()}_${i}`,
+        UTTERANCE: phrase,
         status: 'idle',
-        nluStatus: (item.NLU || item.nlu) ? 'completed' : 'idle',
-        visualStatus: (item["VISUAL-BLOCKS"] || item["visual-blocks"]) ? 'completed' : 'idle',
-        svgStatus: (item.SVG || item.svg) ? 'completed' : 'idle'
+        nluStatus: 'idle',
+        visualStatus: 'idle',
+        svgStatus: 'idle'
       }));
       setRows(prev => [...prev, ...newRows]);
       setViewMode('list');
-      addLog('success', `Importados ${newRows.length} registros desde JSON.`);
+      addLog('success', `Importadas ${newRows.length} frases desde el archivo.`);
     } catch (e) {
-      addLog('error', 'Error al procesar el archivo JSON. Asegúrate de que sea un array de objetos válido.');
+      addLog('error', 'Error al procesar el listado de frases.');
     }
   };
 
-  const downloadTemplate = () => {
-    const template = [{
-      UTTERANCE: "Quiero beber agua",
-      NLU: {},
-      "VISUAL-BLOCKS": "#person, #glass, #water_droplets",
-      PROMPT: "Representación minimalista de una persona bebiendo de un vaso con gotas de agua.",
-      SVG: ""
-    }];
-    const blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = "plantilla_pipeliner.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const exportJSON = () => {
-    const cleanRows = rows.map(({ id, UTTERANCE, NLU, "VISUAL-BLOCKS": vb, PROMPT, SVG }) => ({
-      id, UTTERANCE, NLU, "VISUAL-BLOCKS": vb, PROMPT, SVG
-    }));
-    const blob = new Blob([JSON.stringify(cleanRows, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `pipeliner_export_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `pipeliner_project_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    addLog('success', 'Proyecto exportado como JSON.');
   };
 
   const addNewRow = (textValue: string = "") => {
@@ -180,7 +152,7 @@ const App: React.FC = () => {
           <div className="bg-violet-950 p-2.5 text-white"><PipelineIcon size={24} /></div>
           <div>
             <h1 className="font-bold uppercase tracking-tight text-xl text-slate-900 leading-none">PipeLiner</h1>
-            <span className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">Semantic Workbench</span>
+            <span className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">Visual Master v1.5</span>
           </div>
         </div>
 
@@ -205,13 +177,21 @@ const App: React.FC = () => {
 
       {showConfig && (
         <div className="bg-white border-b p-8 animate-in slide-in-from-top duration-200 shadow-xl">
-          <div className="max-w-4xl mx-auto grid grid-cols-2 gap-8">
+          <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6">
             <div>
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Target Localization Context</label>
+              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Target Language</label>
               <input type="text" value={config.lang} onChange={e => setConfig({...config, lang: e.target.value})} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors" />
             </div>
             <div>
-              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Project Metadata / Signature</label>
+              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">SVG Width (px)</label>
+              <input type="number" value={config.width} onChange={e => setConfig({...config, width: parseInt(e.target.value) || 100})} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors" />
+            </div>
+            <div>
+              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">SVG Height (px)</label>
+              <input type="number" value={config.height} onChange={e => setConfig({...config, height: parseInt(e.target.value) || 100})} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors" />
+            </div>
+            <div>
+              <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2">Author Signature</label>
               <input type="text" value={config.author} onChange={e => setConfig({...config, author: e.target.value})} className="w-full text-xs border p-3 bg-slate-50 focus:bg-white transition-colors" />
             </div>
           </div>
@@ -222,34 +202,28 @@ const App: React.FC = () => {
         {viewMode === 'home' ? (
           <div className="py-20 text-center space-y-16 animate-in fade-in zoom-in-95 duration-700">
             <div className="space-y-4">
-               <div className="inline-flex gap-4 bg-violet-950 text-white px-6 py-2 text-[10px] font-medium uppercase tracking-[0.4em] shadow-lg">
-                <Sparkles size={14}/> Semantic High Fidelity Engine
+              <div className="inline-flex gap-4 bg-violet-950 text-white px-6 py-2 text-[10px] font-medium uppercase tracking-[0.4em] shadow-lg">
+                <Sparkles size={14}/> Expert Visual Strategy System
               </div>
               <h2 className="text-8xl font-black tracking-tighter text-slate-900 leading-none">PIPE<span className="text-violet-950">LINER.</span></h2>
               <p className="text-slate-400 text-xl font-medium max-w-2xl mx-auto leading-relaxed italic">
-                Arquitectura de pictogramas basada en NLU MediaFranca. 
-                Validación semántica estricta y visual blends controlados.
+                Arquitectura de pictogramas basada en NLU y accesibilidad cognitiva.
+                ISO 7001 Compliance Engine.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto">
-              <div onClick={() => processContent(JSON.stringify(CANONICAL_DATA))} className="bg-white p-12 border border-slate-200 text-left space-y-6 shadow-xl hover:border-violet-950 transition-all cursor-pointer group hover:-translate-y-1">
+              <div onClick={() => { setRows(CANONICAL_DATA as RowData[]); setViewMode('list'); }} className="bg-white p-12 border border-slate-200 text-left space-y-6 shadow-xl hover:border-violet-950 transition-all cursor-pointer group hover:-translate-y-1">
                 <div className="text-emerald-600 group-hover:scale-110 transition-transform"><BookOpen size={40}/></div>
                 <h3 className="font-bold text-xl uppercase tracking-wider text-slate-900">Canon Dataset</h3>
-                <p className="text-xs text-slate-500 leading-relaxed font-medium">Carga el set de datos canónico de PictoNet desde JSON.</p>
+                <p className="text-xs text-slate-500 leading-relaxed font-medium">Carga el set de datos canónico de PictoNet.</p>
               </div>
 
               <div onClick={() => fileInputRef.current?.click()} className="bg-violet-950 p-12 text-left space-y-6 shadow-xl hover:bg-black transition-all cursor-pointer group hover:-translate-y-1">
-                <div className="text-white group-hover:scale-110 transition-transform"><Upload size={40}/></div>
-                <h3 className="font-bold text-xl uppercase tracking-wider text-white">Import JSON</h3>
-                <p className="text-xs text-violet-300 leading-relaxed font-medium">Carga un proyecto previo o una lista de enunciados en formato JSON.</p>
-                <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={e => e.target.files?.[0]?.text().then(processContent)}/>
-              </div>
-
-              <div onClick={downloadTemplate} className="bg-slate-100 p-12 text-left space-y-6 shadow-xl hover:bg-slate-200 transition-all cursor-pointer group hover:-translate-y-1">
-                <div className="text-slate-600 group-hover:scale-110 transition-transform"><Download size={40}/></div>
-                <h3 className="font-bold text-xl uppercase tracking-wider text-slate-900">Template JSON</h3>
-                <p className="text-xs text-slate-500 leading-relaxed font-medium">Descarga la estructura de claves transversal (UTTERANCE, NLU...).</p>
+                <div className="text-white group-hover:scale-110 transition-transform"><FileText size={40}/></div>
+                <h3 className="font-bold text-xl uppercase tracking-wider text-white">Import Phrases</h3>
+                <p className="text-xs text-violet-300 leading-relaxed font-medium">Carga un archivo de texto con una frase por línea.</p>
+                <input ref={fileInputRef} type="file" accept=".txt" className="hidden" onChange={e => e.target.files?.[0]?.text().then(processPhrases)}/>
               </div>
             </div>
           </div>
@@ -257,12 +231,12 @@ const App: React.FC = () => {
           <div className="space-y-4 pb-64 animate-in fade-in slide-in-from-bottom-8 duration-500">
             {filteredRows.length === 0 && searchValue && (
               <div className="py-20 text-center border-2 border-dashed border-slate-200 flex flex-col items-center gap-6">
-                <p className="text-slate-400 font-medium uppercase tracking-widest text-xs">No se encontraron resultados para "{searchValue}"</p>
+                <p className="text-slate-400 font-medium uppercase tracking-widest text-xs">No hay resultados para "{searchValue}"</p>
                 <button 
                   onClick={() => addNewRow(searchValue)}
                   className="flex items-center gap-2 bg-violet-950 text-white px-6 py-3 font-bold uppercase text-[10px] tracking-widest hover:bg-black transition-all shadow-lg"
                 >
-                  <Plus size={16}/> Crear Nueva Fila con "{searchValue}"
+                  <Plus size={16}/> Crear Nueva Fila
                 </button>
               </div>
             )}
@@ -285,8 +259,8 @@ const App: React.FC = () => {
       {showConsole && (
         <div className="fixed bottom-0 inset-x-0 h-64 bg-slate-950 text-slate-400 mono text-[10px] p-6 z-50 border-t border-slate-800 overflow-auto shadow-2xl animate-in slide-in-from-bottom duration-300">
           <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-900 font-medium tracking-widest uppercase">
-            <span className="flex items-center gap-3"><Terminal size={14}/> Semantic Monitor Trace</span> 
-            <button onClick={() => setLogs([])} className="hover:text-white transition-colors">Flush Logs</button>
+            <span className="flex items-center gap-3"><Terminal size={14}/> Semantic Trace Monitor</span> 
+            <button onClick={() => setLogs([])} className="hover:text-white transition-colors">Flush</button>
           </div>
           {logs.slice().reverse().map(l => (
             <div key={l.id} className="flex gap-4 py-1 border-b border-slate-900 last:border-0 items-start">
@@ -310,15 +284,12 @@ const RowComponent: React.FC<{
   const handleDownloadSVG = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!row.SVG) return;
-    const filename = row.UTTERANCE.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
     const blob = new Blob([row.SVG], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${filename}.svg`;
-    document.body.appendChild(a);
+    a.download = `${row.UTTERANCE.replace(/\s+/g, '_').toLowerCase()}.svg`;
     a.click();
-    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
@@ -337,7 +308,8 @@ const RowComponent: React.FC<{
           <Badge label="BLOCKS" status={row.visualStatus} />
           <Badge label="SVG" status={row.svgStatus} />
         </div>
-        <div className="w-14 h-14 border bg-slate-50 flex items-center justify-center p-1 group-hover:scale-110 transition-transform cursor-pointer" onClick={() => setIsOpen(!isOpen)} dangerouslySetInnerHTML={{ __html: row.SVG || "" }} />
+        <div className="w-14 h-14 border bg-slate-50 flex items-center justify-center p-1 group-hover:scale-110 transition-transform cursor-pointer overflow-hidden" 
+             onClick={() => setIsOpen(!isOpen)} dangerouslySetInnerHTML={{ __html: row.SVG || "" }} />
         <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
           <button onClick={e => { e.stopPropagation(); onCascade(); }} className="p-3 bg-violet-950 text-white shadow-lg hover:bg-black transition-all"><PlayCircle size={18}/></button>
           <button onClick={e => { e.stopPropagation(); onDelete(); }} className="p-3 text-rose-300 hover:text-rose-600 transition-colors"><Trash2 size={18}/></button>
@@ -347,43 +319,46 @@ const RowComponent: React.FC<{
 
       {isOpen && (
         <div className="p-8 border-t bg-slate-50/30 grid grid-cols-1 lg:grid-cols-3 gap-10 animate-in slide-in-from-top-2">
-          <StepBox label="NLU (MediaFranca)" status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} duration={row.nluDuration}>
+          <StepBox label="NLU Architecture" status={row.nluStatus} onRegen={() => onProcess('nlu')} onStop={onStop} duration={row.nluDuration}>
             <SmartNLUEditor data={row.NLU} onUpdate={val => onUpdate({ NLU: val })} />
           </StepBox>
 
-          <StepBox label="BLOCKS & PROMPT" status={row.visualStatus} onRegen={() => onProcess('visual')} onStop={onStop} duration={row.visualDuration}>
+          <StepBox label="Visual Strategy" status={row.visualStatus} onRegen={() => onProcess('visual')} onStop={onStop} duration={row.visualDuration}>
              <div className="flex flex-col h-full gap-6">
-                <div className="mb-2">
-                  <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 tracking-widest">Fixed Visual Blocks</label>
+                <div>
+                  <label className="text-[10px] font-medium uppercase text-slate-400 block mb-2 tracking-widest">ISO Semantic Blocks</label>
                   <BlocksList value={row["VISUAL-BLOCKS"] || ""} onChange={val => onUpdate({ "VISUAL-BLOCKS": val })} />
                 </div>
                 <div className="flex-1 mt-6 border-t pt-6 border-slate-200">
-                  <label className="text-[10px] font-medium uppercase text-slate-400 block mb-3 tracking-widest">Drawing Strategy (Prompt)</label>
+                  <label className="text-[10px] font-medium uppercase text-slate-400 block mb-3 tracking-widest">Spatial Articulation Logic</label>
                   <textarea 
                     value={row.PROMPT || ""} onChange={e => onUpdate({ PROMPT: e.target.value })} 
                     className="w-full h-full border-none p-0 text-lg font-light text-slate-700 outline-none focus:ring-0 bg-transparent resize-none leading-relaxed" 
-                    placeholder="Describe the spatial strategy and visual blends..."
+                    placeholder="Describe how elements connect spatially..."
                   />
                 </div>
              </div>
           </StepBox>
 
           <StepBox 
-            label="SVG RENDERING" status={row.svgStatus} onRegen={() => onProcess('svg')} onStop={onStop} duration={row.svgDuration}
-            actionNode={row.SVG && <button onClick={handleDownloadSVG} className="p-2 border hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all rounded-full flex items-center justify-center bg-white shadow-sm" title="Descargar SVG Final"><FileDown size={14}/></button>}
+            label="SVG Render" status={row.svgStatus} onRegen={() => onProcess('svg')} onStop={onStop} duration={row.svgDuration}
+            actionNode={row.SVG && <button onClick={handleDownloadSVG} className="p-2 border hover:border-violet-950 text-slate-400 hover:text-violet-950 transition-all rounded-full flex items-center justify-center bg-white shadow-sm" title="Download SVG"><FileDown size={14}/></button>}
           >
             <div className="flex flex-col h-full gap-4">
               <div className="relative group/code">
                 <textarea 
                   value={row.SVG || ""} onChange={e => onUpdate({ SVG: e.target.value })} 
                   className="w-full h-32 bg-white text-slate-600 p-4 mono text-[9px] resize-none border border-slate-200 outline-none shadow-sm focus:bg-white transition-colors"
-                  placeholder="SVG Output..."
+                  placeholder="SVG Code Output..."
                 />
                 <Code className="absolute top-2 right-2 text-slate-200 opacity-20 group-hover/code:opacity-100 transition-opacity" size={14}/>
               </div>
-              <div className="flex-1 border-2 border-slate-200 bg-white flex items-center justify-center p-4 shadow-inner relative overflow-hidden group/preview min-h-[250px]">
+              <div 
+                className="flex-1 border-2 border-slate-200 flex items-center justify-center p-4 shadow-inner relative overflow-hidden group/preview min-h-[250px]"
+                style={{ backgroundColor: 'lightgrey' }}
+              >
                  <div className="w-full h-full flex items-center justify-center transition-transform duration-500 group-hover/preview:scale-110" 
-                      dangerouslySetInnerHTML={{ __html: (row.SVG || '').includes('<svg') ? row.SVG! : '<div class="text-[10px] text-slate-200 uppercase font-medium">Waiting for render...</div>' }} />
+                      dangerouslySetInnerHTML={{ __html: (row.SVG || '').includes('<svg') ? row.SVG! : '<div class="text-[10px] text-slate-400 uppercase font-medium">No Vector Render</div>' }} />
               </div>
             </div>
           </StepBox>
@@ -522,7 +497,7 @@ const BlocksList: React.FC<{ value: string; onChange: (v: string) => void }> = (
         </span>
       ))}
       <input 
-        type="text" placeholder="+ Add Element ID" 
+        type="text" placeholder="+ Add Element ID (ex: person)" 
         onKeyDown={e => { if(e.key === 'Enter' && e.currentTarget.value) { onChange(value ? `${value}, ${e.currentTarget.value}` : e.currentTarget.value); e.currentTarget.value = ''; } }}
         className="text-[11px] font-medium text-violet-950 w-full bg-transparent outline-none mt-2 pt-2 border-t border-slate-100"
       />

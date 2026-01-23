@@ -26,11 +26,11 @@ const cleanJSONResponse = (text: string): string => {
 
 export const generateNLU = async (utterance: string): Promise<NLUData> => {
   const ai = getAI();
-  const systemInstruction = `You are a MediaFranca Semanticist. 
-  Generate a formal NLU JSON for the given UTTERANCE.
-  CRITICAL: The NLU schema (intents, frames, guidelines) MUST ALWAYS BE IN ENGLISH (Strict EN-US).
-  Follow the MediaFranca PictoNet standard for NLU structure.
-  Return only valid JSON.`;
+  const systemInstruction = `You are an expert in Visual Communication and Cognitive Accessibility. 
+  Your task is to generate a high-fidelity MediaFranca NLU JSON for the given UTTERANCE.
+  The goal is to provide clear semantic anchors for a future pictogram.
+  CRITICAL: All keys and values in the JSON (intents, frames, guidelines) MUST BE IN ENGLISH.
+  Follow strict cognitive accessibility standards: reduce ambiguity, highlight the core action and agents.`;
   
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
@@ -113,22 +113,25 @@ export const generateNLU = async (utterance: string): Promise<NLUData> => {
 
 export const generateVisualBlueprint = async (nlu: NLUData, lang: string): Promise<Partial<RowData>> => {
   const ai = getAI();
-  const systemInstruction = `You are a Visual Architect for PictoNet. Translate NLU semantics into a visual pictogram structure.
+  const systemInstruction = `You are a Senior Visual Communication Strategist specializing in Cognitive Accessibility and ISO visual standards.
+  Your goal is to define the visual structure for a universal pictogram.
 
   REGLAS DE BLOQUES VISUALES (VISUAL-BLOCKS):
-  1. NO USAR VERBOS. Los IDs deben ser sustantivos o componentes físicos (ej. NO "#running", SÍ "#legs_extended, #motion_lines").
-  2. INCORPORA VISUAL BLENDS: Si hay movimiento, añade "#motion_lines". Si hay foco, "#focus_indicator". Si hay deseo, "#heart_symbol" o similares.
-  3. ESTRUCTURA: Lista de IDs separados por comas empezando con #.
+  1. Utiliza IDs de elementos sustantivos puros (NO incluyas el signo #). 
+  2. Ejemplos correctos: "person", "water_glass", "motion_lines", "focus_aura".
+  3. No uses verbos conjugados como IDs.
   
   REGLAS DE PROMPT:
-  1. Debe estar en ${lang}.
-  2. Describe la composición espacial: ¿dónde está el actor? ¿dónde el objeto? ¿qué "visual blends" se usan para representar la acción?
-  
+  1. Debe estar redactado en ${lang}.
+  2. DEBES incluir los IDs de los bloques visuales seleccionados en el texto.
+  3. Describe meticulosamente la ARTICULACIÓN ESPACIAL: posición relativa de los elementos, proporciones y cómo se conectan para representar la acción semántica.
+  4. Sigue principios de diseño para baja carga cognitiva: simplicidad, eliminación de ruido visual y jerarquía clara.
+
   Return valid JSON only with keys "VISUAL-BLOCKS" and "PROMPT".`;
   
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
-    contents: `NLU Data: ${JSON.stringify(nlu)}`,
+    contents: `NLU Semantics: ${JSON.stringify(nlu)}`,
     config: {
       systemInstruction,
       responseMimeType: "application/json",
@@ -148,21 +151,28 @@ export const generateVisualBlueprint = async (nlu: NLUData, lang: string): Promi
 
 export const generateSVG = async (visualBlocks: string, prompt: string, row: any, config: GlobalConfig): Promise<string> => {
   const ai = getAI();
-  const systemInstruction = `You are a professional SVG Engineer for PictoNet.
-  
-  CRITICAL STYLING RULES:
-  - Class .f: FILL WHITE (#fff), STROKE BLACK (#000). Use for solid objects.
-  - Class .k: FILL BLACK (#000), STROKE WHITE (#fff). Use for high-contrast or human figures.
-  - VISUAL BLENDS (Líneas de movimiento, auras): Represent them using clean, minimalist strokes (stroke-width: 2px typical).
-  
-  INTEGRATION:
-  Interpret the requested Visual Blocks [${visualBlocks}] and the Strategy [${prompt}].
-  Ensure the SVG is semantic, uses <g> with IDs, and provides accessibility tags in ${config.lang}.
-  Output raw <svg> only, 100x100 viewport.`;
+  const systemInstruction = `You are a Master SVG Architect and Accessibility Engineer.
+  Create a professional, high-fidelity pictogram following ISO 7001 (Public Information Symbols) and ISO 9186.
+
+  TECHNICAL CONSTRAINTS:
+  - Viewport: ${config.width}x${config.height}.
+  - Attributes: xmlns="http://www.w3.org/2000/svg", viewBox="0 0 ${config.width} ${config.height}".
+  - Styling:
+    * Use class="f" for white fill/black stroke elements (solid objects).
+    * Use class="k" for black fill/white stroke elements (human figures, emphasis).
+    * Keep stroke-width relative and clean (approx 2px to 4px).
+  - Structure: Use <g> groups for logical elements with IDs matching the requested Visual Blocks.
+  - Accessibility: Include <title> and <desc> in ${config.lang} inside the SVG.
+
+  DESIGN STRATEGY:
+  ${prompt}
+  Visual Elements to implement: ${visualBlocks}.
+
+  Output the raw <svg> string only.`;
 
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
-    contents: `Strategy: ${prompt}. Required Visual Elements: ${visualBlocks}. Create the final PictoNet SVG.`,
+    contents: `Execute SVG construction for: ${row.UTTERANCE}. Dimensions: ${config.width}x${config.height}.`,
     config: { systemInstruction }
   });
 

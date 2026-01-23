@@ -62,7 +62,8 @@ export interface LogEntry {
 
 export interface GlobalConfig {
   lang: string;
-  svgSize: number;
+  width: number;
+  height: number;
   author: string;
   license: string;
 }
